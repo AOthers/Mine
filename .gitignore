@@ -12,6 +12,8 @@ build/
 
 # Local machine config
 local.properties
+keystore.properties
+*.jks
 
 # Generated files
 *.apk
