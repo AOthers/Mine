@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- 缓存目录中的 APK 文件 -->
     <cache-path name="apk_cache" path="apk_backup/" />
     <cache-path name="download_cache" path="apk_download/" />
+    <external-files-path name="restore_external_files" path="." />
+    <external-path name="restore_external" path="." />
 </paths>

@@ -4,11 +4,23 @@ import android.graphics.drawable.BitmapDrawable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -31,44 +43,47 @@ fun AppItem(
             if (drawable is BitmapDrawable) {
                 drawable.bitmap
             } else {
-                val w = drawable.intrinsicWidth.coerceAtLeast(1)
-                val h = drawable.intrinsicHeight.coerceAtLeast(1)
-                val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-                val canvas = android.graphics.Canvas(bmp)
-                drawable.setBounds(0, 0, w, h)
+                val width = drawable.intrinsicWidth.coerceAtLeast(1)
+                val height = drawable.intrinsicHeight.coerceAtLeast(1)
+                val bitmap = android.graphics.Bitmap.createBitmap(
+                    width,
+                    height,
+                    android.graphics.Bitmap.Config.ARGB_8888,
+                )
+                val canvas = android.graphics.Canvas(bitmap)
+                drawable.setBounds(0, 0, width, height)
                 drawable.draw(canvas)
-                bmp
+                bitmap
             }
         }
     }
 
-    Surface(
+    Card(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
             .combinedClickable(onClick = onToggle),
-        color = if (isSelected)
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        else
-            MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Row(
-            modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 选择图标
             Icon(
-                imageVector = if (isSelected) Icons.Default.CheckCircle
-                else Icons.Default.RadioButtonUnchecked,
-                contentDescription = if (isSelected) "已选" else "未选",
-                tint = if (isSelected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = if (isSelected) "已选择" else "未选择",
+                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp),
             )
-
             Spacer(Modifier.width(12.dp))
-
-            // 应用图标
             if (iconBitmap != null) {
                 Image(
                     bitmap = iconBitmap.asImageBitmap(),
@@ -78,14 +93,11 @@ fun AppItem(
             } else {
                 Surface(
                     modifier = Modifier.size(40.dp),
-                    shape = MaterialTheme.shapes.small,
+                    shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {}
             }
-
             Spacer(Modifier.width(12.dp))
-
-            // 应用信息
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = app.appName,
@@ -103,6 +115,4 @@ fun AppItem(
             }
         }
     }
-
-    Divider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 }

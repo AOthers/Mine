@@ -6,41 +6,32 @@ import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.wode.app.data.BaiduToken
 import com.wode.app.data.BackupRecord
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import okhttp3.*
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.FileInputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.FormBody
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 
-/**
- * 百度网盘 Open API 服务
- *
- * 上传流程（分片）:
- *   1. POST xpan/file?method=precreate  → 获取 uploadid
- *   2. POST d.pcs.baidu.com/.../superfile2?method=upload&partseq=N  → 逐个上传分片
- *   3. POST xpan/file?method=create  → 完成上传
- *
- * 参考: https://pan.baidu.com/union/doc/
- */
 class BaiduPanService(private val context: Context) {
 
     companion object {
         private const val BASE_URL = "https://pan.baidu.com/rest/2.0"
         private const val OAUTH_AUTHORIZE = "https://openapi.baidu.com/oauth/2.0/authorize"
         private const val OAUTH_TOKEN = "https://openapi.baidu.com/oauth/2.0/token"
-
-        // 分片大小：4MB
         private const val BLOCK_SIZE = 4 * 1024 * 1024L
 
-        // 备份目录
-        const val BACKUP_PATH = "/apps/AppBackup"
+        const val DEFAULT_BACKUP_PATH = TokenStore.DEFAULT_BACKUP_PATH
     }
 
     private val gson = Gson()
@@ -48,9 +39,9 @@ class BaiduPanService(private val context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(120, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
-
-    // ==================== OAuth ====================
 
     fun getOAuthUrl(appKey: String): String {
         return Uri.parse(OAUTH_AUTHORIZE).buildUpon()
@@ -72,7 +63,9 @@ class BaiduPanService(private val context: Context) {
     }
 
     suspend fun exchangeToken(
-        appKey: String, secretKey: String, authCode: String
+        appKey: String,
+        secretKey: String,
+        authCode: String,
     ): Result<BaiduToken> = withContext(Dispatchers.IO) {
         try {
             val body = FormBody.Builder()
@@ -85,20 +78,26 @@ class BaiduPanService(private val context: Context) {
 
             val json = postForJson(OAUTH_TOKEN, body, OAuthResponse::class.java)
             if (json.error != null) {
-                Result.failure(Exception("OAuth 失败: ${json.error} - ${json.errorDescription}"))
+                Result.failure(Exception("OAuth 失败：${json.error} - ${json.errorDescription}"))
             } else {
-                Result.success(BaiduToken(
-                    accessToken = json.accessToken!!,
-                    refreshToken = json.refreshToken!!,
-                    expiresIn = json.expiresIn!!,
-                    obtainTime = System.currentTimeMillis(),
-                ))
+                Result.success(
+                    BaiduToken(
+                        accessToken = json.accessToken!!,
+                        refreshToken = json.refreshToken!!,
+                        expiresIn = json.expiresIn!!,
+                        obtainTime = System.currentTimeMillis(),
+                    ),
+                )
             }
-        } catch (e: Exception) { Result.failure(e) }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun refreshToken(
-        appKey: String, secretKey: String, refreshToken: String
+        appKey: String,
+        secretKey: String,
+        refreshToken: String,
     ): Result<BaiduToken> = withContext(Dispatchers.IO) {
         try {
             val body = FormBody.Builder()
@@ -110,28 +109,28 @@ class BaiduPanService(private val context: Context) {
 
             val json = postForJson(OAUTH_TOKEN, body, OAuthResponse::class.java)
             if (json.error != null) {
-                Result.failure(Exception("Token 刷新失败: ${json.error}"))
+                Result.failure(Exception("Token 刷新失败：${json.error}"))
             } else {
-                Result.success(BaiduToken(
-                    accessToken = json.accessToken!!,
-                    refreshToken = json.refreshToken!!,
-                    expiresIn = json.expiresIn!!,
-                    obtainTime = System.currentTimeMillis(),
-                ))
+                Result.success(
+                    BaiduToken(
+                        accessToken = json.accessToken!!,
+                        refreshToken = json.refreshToken!!,
+                        expiresIn = json.expiresIn!!,
+                        obtainTime = System.currentTimeMillis(),
+                    ),
+                )
             }
-        } catch (e: Exception) { Result.failure(e) }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
-    // ==================== 文件上传（分片） ====================
-
-    /**
-     * 上传 APK 文件到百度网盘（分片上传）
-     */
     suspend fun uploadFile(
         token: String,
         file: File,
         remotePath: String,
-        onProgress: ((Long, Long) -> Unit)? = null
+        overwrite: Boolean,
+        onProgress: ((Long, Long) -> Unit)? = null,
     ): Result<BackupRecord> = withContext(Dispatchers.IO) {
         try {
             val fileSize = file.length()
@@ -139,11 +138,9 @@ class BaiduPanService(private val context: Context) {
             val blockCount = ((fileSize + BLOCK_SIZE - 1) / BLOCK_SIZE).toInt()
             val blockMd5s = computeBlockMd5s(file, blockCount)
 
-            // Step 1: precreate — 获取 uploadid
-            val uploadId = preCreate(token, remotePath, fileSize, blockMd5s)
+            val uploadId = preCreate(token, remotePath, fileSize, blockMd5s, overwrite)
                 .getOrElse { return@withContext Result.failure(it) }
 
-            // Step 2: 逐个上传分片到 PCS
             var uploadedBytes = 0L
             RandomAccessFile(file, "r").use { raf ->
                 for (i in 0 until blockCount) {
@@ -160,48 +157,57 @@ class BaiduPanService(private val context: Context) {
                 }
             }
 
-            // Step 3: create — 完成上传
-            createFile(token, remotePath, fileSize, uploadId, blockMd5s)
+            val createdFile = createFile(token, remotePath, fileSize, uploadId, blockMd5s, overwrite)
 
-            Result.success(BackupRecord(
-                packageName = "", appName = "", versionName = "",
-                fsId = 0, path = remotePath, size = fileSize,
-                uploadTime = System.currentTimeMillis(), md5 = fileMd5,
-            ))
+            Result.success(
+                BackupRecord(
+                    packageName = "",
+                    appName = "",
+                    versionName = "",
+                    fsId = createdFile.fsId ?: 0,
+                    path = createdFile.path ?: remotePath,
+                    size = fileSize,
+                    uploadTime = System.currentTimeMillis(),
+                    md5 = fileMd5,
+                ),
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    // --- Step 1: precreate ---
     private fun preCreate(
-        token: String, path: String, size: Long, blockMd5s: List<String>
+        token: String,
+        path: String,
+        size: Long,
+        blockMd5s: List<String>,
+        overwrite: Boolean,
     ): Result<String> {
-        val blockListJson = gson.toJson(blockMd5s)
-
         val body = FormBody.Builder()
             .add("access_token", token)
             .add("path", path)
             .add("size", size.toString())
             .add("isdir", "0")
             .add("autoinit", "1")
-            .add("block_list", blockListJson)
+            .add("rtype", if (overwrite) "3" else "0")
+            .add("block_list", gson.toJson(blockMd5s))
             .build()
 
-        val url = "$BASE_URL/xpan/file?method=precreate"
-        val json = postForJson(url, body, PreCreateResponse::class.java)
-
+        val json = postForJson("$BASE_URL/xpan/file?method=precreate", body, PreCreateResponse::class.java)
         if (json.errno != 0) {
-            return Result.failure(Exception("precreate 失败: errno=${json.errno}"))
+            return Result.failure(Exception("precreate 失败：errno=${json.errno}"))
         }
         val uploadId = json.uploadid
-            ?: return Result.failure(Exception("precreate 失败: 无 uploadid"))
+            ?: return Result.failure(Exception("precreate 失败：没有 uploadid"))
         return Result.success(uploadId)
     }
 
-    // --- Step 2: 上传单个分片到 PCS ---
     private fun uploadBlockToPcs(
-        token: String, path: String, uploadId: String, partSeq: Int, data: ByteArray
+        token: String,
+        path: String,
+        uploadId: String,
+        partSeq: Int,
+        data: ByteArray,
     ) {
         val blockBody = data.toRequestBody("application/octet-stream".toMediaType())
         val requestBody = MultipartBody.Builder()
@@ -224,59 +230,55 @@ class BaiduPanService(private val context: Context) {
             .addQueryParameter("partseq", partSeq.toString())
             .build()
 
-        val request = Request.Builder().url(url).post(requestBody).build()
-        val response = client.newCall(request).execute()
+        val response = client.newCall(Request.Builder().url(url).post(requestBody).build()).execute()
         val body = response.body?.string() ?: "{}"
-
         if (!response.isSuccessful) {
-            throw Exception("分片 $partSeq 上传失败: HTTP ${response.code}, body=$body")
+            throw Exception("分片 $partSeq 上传失败：HTTP ${response.code}, body=$body")
         }
 
-        // 解析 PCS 返回，百度可能 HTTP 200 但返回错误码
         val pcsResp = gson.fromJson(body, PcsUploadResponse::class.java)
-        if (pcsResp.error_code != null && pcsResp.error_code != 0) {
-            throw Exception("分片 $partSeq 上传失败: errno=${pcsResp.error_code}, msg=${pcsResp.error_msg}")
+        if (pcsResp.errorCode != null && pcsResp.errorCode != 0) {
+            throw Exception("分片 $partSeq 上传失败：errno=${pcsResp.errorCode}, msg=${pcsResp.errorMsg}")
         }
-        // 校验返回的 MD5
         if (pcsResp.md5 != null) {
             val localMd5 = MessageDigest.getInstance("MD5")
-                .digest(data).joinToString("") { "%02x".format(it) }
+                .digest(data)
+                .joinToString("") { "%02x".format(it) }
             if (!pcsResp.md5.equals(localMd5, ignoreCase = true)) {
-                throw Exception("分片 $partSeq MD5 不匹配: 本地=$localMd5, 服务端=${pcsResp.md5}")
+                throw Exception("分片 $partSeq MD5 不匹配：本地=$localMd5, 服务端=${pcsResp.md5}")
             }
         }
     }
 
-    // --- Step 3: create ---
     private fun createFile(
-        token: String, path: String, size: Long, uploadId: String, blockMd5s: List<String>
-    ) {
-        val blockListJson = gson.toJson(blockMd5s)
-
+        token: String,
+        path: String,
+        size: Long,
+        uploadId: String,
+        blockMd5s: List<String>,
+        overwrite: Boolean,
+    ): CreateResponse {
         val body = FormBody.Builder()
             .add("access_token", token)
             .add("path", path)
             .add("size", size.toString())
             .add("isdir", "0")
             .add("uploadid", uploadId)
-            .add("block_list", blockListJson)
-            .add("rtype", "3")
+            .add("block_list", gson.toJson(blockMd5s))
+            .add("rtype", if (overwrite) "3" else "0")
             .build()
 
-        val url = "$BASE_URL/xpan/file?method=create"
-        val json = postForJson(url, body, BaseResponse::class.java)
-
+        val json = postForJson("$BASE_URL/xpan/file?method=create", body, CreateResponse::class.java)
         if (json.errno != 0) {
-            throw Exception("create 失败: errno=${json.errno}")
+            throw Exception("create 失败：errno=${json.errno}")
         }
+        return json
     }
 
-    // ==================== 文件列表 / 下载 ====================
-
-    suspend fun listBackupFiles(token: String): Result<List<RemoteFileInfo>> =
+    suspend fun listBackupFiles(token: String, backupPath: String): Result<List<RemoteFileInfo>> =
         withContext(Dispatchers.IO) {
             try {
-                ensureDir(token, BACKUP_PATH)
+                ensureDir(token, backupPath)
                 val url = HttpUrl.Builder()
                     .scheme("https")
                     .host("pan.baidu.com")
@@ -286,15 +288,17 @@ class BaiduPanService(private val context: Context) {
                     .addPathSegment("file")
                     .addQueryParameter("method", "list")
                     .addQueryParameter("access_token", token)
-                    .addQueryParameter("dir", BACKUP_PATH)
+                    .addQueryParameter("dir", backupPath)
                     .addQueryParameter("limit", "1000")
                     .build()
                 val json = getForJson(url.toString(), ListResponse::class.java)
                 if (json.errno != 0) {
-                    return@withContext Result.failure(Exception("获取文件列表失败: errno=${json.errno}"))
+                    return@withContext Result.failure(Exception("获取文件列表失败：errno=${json.errno}"))
                 }
                 Result.success(json.list ?: emptyList())
-            } catch (e: Exception) { Result.failure(e) }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
 
     suspend fun getDownloadUrl(token: String, fsId: Long): Result<String> =
@@ -306,56 +310,76 @@ class BaiduPanService(private val context: Context) {
                     .addPathSegment("rest")
                     .addPathSegment("2.0")
                     .addPathSegment("xpan")
-                    .addPathSegment("file")
+                    .addPathSegment("multimedia")
                     .addQueryParameter("method", "filemetas")
                     .addQueryParameter("access_token", token)
                     .addQueryParameter("fsids", "[$fsId]")
+                    .addQueryParameter("thumb", "0")
                     .addQueryParameter("dlink", "1")
+                    .addQueryParameter("extra", "0")
                     .build()
                 val json = getForJson(url.toString(), FileMetaResponse::class.java)
-                if (json.errno != 0 || json.list.isNullOrEmpty()) {
-                    return@withContext Result.failure(Exception("获取下载链接失败"))
+                if (json.errno != 0) {
+                    val message = json.errmsg ?: "errno=${json.errno}"
+                    return@withContext Result.failure(Exception("filemetas 失败：$message"))
                 }
-                val dlink = json.list[0].dlink
+                if (json.list.isNullOrEmpty()) {
+                    return@withContext Result.failure(Exception("filemetas 未返回文件信息，请刷新列表后重试"))
+                }
+                val meta = json.list[0]
+                val dlink = meta.dlink
                 if (dlink.isNullOrBlank()) {
-                    return@withContext Result.failure(Exception("下载链接为空"))
+                    return@withContext Result.failure(Exception("下载链接为空：${meta.filename ?: meta.serverFilename ?: fsId}"))
                 }
                 Result.success(dlink)
-            } catch (e: Exception) { Result.failure(e) }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
 
-    /**
-     * 下载文件到本地
-     */
-    suspend fun downloadFile(token: String, dlink: String, destFile: File): Result<File> =
+    suspend fun downloadFile(
+        token: String,
+        dlink: String,
+        target: RestoreTarget,
+        onProgress: ((Long, Long) -> Unit)? = null,
+    ): Result<RestoreTarget> =
         withContext(Dispatchers.IO) {
             try {
-                // dlink 是百度返回的预签名 URL，安全地拼接 access_token
                 val downloadUrl = dlink.toHttpUrlOrNull()?.newBuilder()
                     ?.addQueryParameter("access_token", token)
                     ?.build()
                     ?: return@withContext Result.failure(Exception("下载链接格式无效"))
                 val request = Request.Builder()
                     .url(downloadUrl)
+                    .header("User-Agent", "pan.baidu.com")
+                    .header("Referer", "https://pan.baidu.com/")
                     .get()
                     .build()
 
                 val response = client.newCall(request).execute()
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("下载失败: HTTP ${response.code}"))
+                    return@withContext Result.failure(Exception("下载失败：HTTP ${response.code}"))
                 }
 
-                destFile.parentFile?.mkdirs()
+                val totalBytes = response.body?.contentLength()?.takeIf { it > 0 } ?: 0L
                 response.body?.byteStream()?.use { input ->
-                    destFile.outputStream().use { output ->
-                        input.copyTo(output)
+                    target.output.use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var downloadedBytes = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            downloadedBytes += read
+                            onProgress?.invoke(downloadedBytes, totalBytes)
+                        }
                     }
-                }
-                Result.success(destFile)
-            } catch (e: Exception) { Result.failure(e) }
+                } ?: return@withContext Result.failure(Exception("下载失败：响应为空"))
+                Result.success(target)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
-
-    // ==================== 辅助方法 ====================
 
     private fun ensureDir(token: String, dirPath: String) {
         val body = FormBody.Builder()
@@ -366,15 +390,20 @@ class BaiduPanService(private val context: Context) {
             .add("size", "0")
             .add("rtype", "0")
             .build()
-        try { client.newCall(Request.Builder().url("$BASE_URL/xpan/file").post(body).build()).execute() }
-        catch (_: Exception) {}
+        runCatching {
+            client.newCall(Request.Builder().url("$BASE_URL/xpan/file").post(body).build()).execute().close()
+        }
     }
 
     private fun computeFileMd5(file: File): String {
         val digest = MessageDigest.getInstance("MD5")
-        FileInputStream(file).use { fis ->
-            val buf = ByteArray(8192); var n: Int
-            while (fis.read(buf).also { n = it } != -1) digest.update(buf, 0, n)
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                digest.update(buffer, 0, read)
+            }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
@@ -388,7 +417,8 @@ class BaiduPanService(private val context: Context) {
                 val offset = i * BLOCK_SIZE
                 val size = minOf(BLOCK_SIZE, file.length() - offset)
                 val block = ByteArray(size.toInt())
-                raf.seek(offset); raf.readFully(block)
+                raf.seek(offset)
+                raf.readFully(block)
                 digest.update(block)
                 md5s.add(digest.digest().joinToString("") { "%02x".format(it) })
             }
@@ -399,16 +429,22 @@ class BaiduPanService(private val context: Context) {
     private inline fun <reified T> postForJson(url: String, body: RequestBody, clazz: Class<T>): T {
         val request = Request.Builder().url(url).post(body).build()
         val response = client.newCall(request).execute()
-        return gson.fromJson(response.body?.string(), clazz)
+        return response.use {
+            gson.fromJson(it.body?.string(), clazz)
+        }
     }
 
     private inline fun <reified T> getForJson(url: String, clazz: Class<T>): T {
-        val request = Request.Builder().url(url).get().build()
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "pan.baidu.com")
+            .get()
+            .build()
         val response = client.newCall(request).execute()
-        return gson.fromJson(response.body?.string(), clazz)
+        return response.use {
+            gson.fromJson(it.body?.string(), clazz)
+        }
     }
-
-    // ==================== API 响应数据类 ====================
 
     data class OAuthResponse(
         val error: String?,
@@ -418,7 +454,11 @@ class BaiduPanService(private val context: Context) {
         @SerializedName("expires_in") val expiresIn: Long?,
     )
 
-    data class BaseResponse(val errno: Int)
+    data class CreateResponse(
+        val errno: Int,
+        @SerializedName("fs_id") val fsId: Long?,
+        val path: String?,
+    )
 
     data class PreCreateResponse(
         val errno: Int,
@@ -442,18 +482,20 @@ class BaiduPanService(private val context: Context) {
 
     data class FileMetaResponse(
         val errno: Int,
+        val errmsg: String?,
         val list: List<FileMeta>?,
     )
 
     data class FileMeta(
         @SerializedName("fs_id") val fsId: Long,
+        @SerializedName("server_filename") val serverFilename: String?,
+        val filename: String?,
         val dlink: String?,
     )
 
-    /** PCS superfile2 分片上传响应 */
     data class PcsUploadResponse(
         val md5: String?,
-        val error_code: Int?,
-        val error_msg: String?,
+        @SerializedName("error_code") val errorCode: Int?,
+        @SerializedName("error_msg") val errorMsg: String?,
     )
 }
