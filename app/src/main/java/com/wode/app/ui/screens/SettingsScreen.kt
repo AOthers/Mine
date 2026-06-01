@@ -18,11 +18,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,11 +59,11 @@ fun SettingsScreen(
     onPathSaved: (String) -> Unit,
 ) {
     val isAuthorized by viewModel.isAuthorized.collectAsState()
+    val restoreDisplayPath by viewModel.restoreDisplayPath.collectAsState()
 
     var appKey by remember { mutableStateOf(tokenStore.getAppKey()) }
     var secretKey by remember { mutableStateOf(tokenStore.getSecretKey()) }
     var backupPath by remember { mutableStateOf(tokenStore.getBackupPath()) }
-    var actualRestorePath by remember { mutableStateOf(viewModel.getRestorePath()) }
     var sameVersionStrategy by remember { mutableStateOf(tokenStore.getSameVersionStrategy()) }
     var showApiTutorial by remember { mutableStateOf(false) }
 
@@ -234,6 +234,7 @@ fun SettingsScreen(
                         onClick = {
                             tokenStore.saveBackupPath(backupPath)
                             backupPath = tokenStore.getBackupPath()
+                            viewModel.loadBackupRecords()
                             onPathSaved("网盘备份路径已更新：$backupPath")
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -252,27 +253,27 @@ fun SettingsScreen(
                     Text("恢复安装包保存位置", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "默认路径不变，但这里直接显示完整 Android/data 路径。相对路径会保存到应用专属外部目录；绝对路径会按填写内容使用。",
+                        text = "下载的恢复安装包会保存到这里。默认位置是应用自己的 Android/data 目录，也可以选择其他文件夹。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "当前实际路径：$actualRestorePath",
+                        text = "当前保存位置：\n$restoreDisplayPath",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = {
                             onChooseRestoreFolder()
-                            actualRestorePath = viewModel.getRestorePath()
+                            viewModel.refreshRestoreDisplayPath()
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("选择恢复文件夹")
+                        Text("选择保存文件夹")
                     }
                 }
             }

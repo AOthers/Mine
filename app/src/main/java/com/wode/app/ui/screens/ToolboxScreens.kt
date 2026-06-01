@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HomeRepairService
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SettingsBackupRestore
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.wode.app.BuildConfig
 import com.wode.app.MainActivity.MainTab
 
 @Composable
@@ -104,8 +106,11 @@ fun ToolboxHomeScreenContent(
     isBaiduAuthorized: Boolean,
     backupCount: Int,
     isBackupRestoreFavorite: Boolean,
+    isMoviesFavorite: Boolean,
     onOpenBackupRestore: () -> Unit,
+    onOpenMovies: () -> Unit,
     onSetBackupRestoreFavorite: (Boolean) -> Unit,
+    onSetMoviesFavorite: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -133,18 +138,27 @@ fun ToolboxHomeScreenContent(
             onClick = onOpenBackupRestore,
             onSetFavorite = onSetBackupRestoreFavorite,
         )
+        Spacer(Modifier.height(14.dp))
+        MoviesToolCard(
+            isFavorite = isMoviesFavorite,
+            onClick = onOpenMovies,
+            onSetFavorite = onSetMoviesFavorite,
+        )
     }
 }
 
 @Composable
 fun FavoritesScreen(
     isBackupRestoreFavorite: Boolean,
+    isMoviesFavorite: Boolean,
     backupCount: Int,
     isBaiduAuthorized: Boolean,
     onOpenBackupRestore: () -> Unit,
+    onOpenMovies: () -> Unit,
     onSetBackupRestoreFavorite: (Boolean) -> Unit,
+    onSetMoviesFavorite: (Boolean) -> Unit,
 ) {
-    if (isBackupRestoreFavorite) {
+    if (isBackupRestoreFavorite || isMoviesFavorite) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -156,13 +170,25 @@ fun FavoritesScreen(
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(20.dp))
-            BackupRestoreToolCard(
-                backupCount = backupCount,
-                isAuthorized = isBaiduAuthorized,
-                isFavorite = true,
-                onClick = onOpenBackupRestore,
-                onSetFavorite = onSetBackupRestoreFavorite,
-            )
+            if (isBackupRestoreFavorite) {
+                BackupRestoreToolCard(
+                    backupCount = backupCount,
+                    isAuthorized = isBaiduAuthorized,
+                    isFavorite = true,
+                    onClick = onOpenBackupRestore,
+                    onSetFavorite = onSetBackupRestoreFavorite,
+                )
+            }
+            if (isBackupRestoreFavorite && isMoviesFavorite) {
+                Spacer(Modifier.height(14.dp))
+            }
+            if (isMoviesFavorite) {
+                MoviesToolCard(
+                    isFavorite = true,
+                    onClick = onOpenMovies,
+                    onSetFavorite = onSetMoviesFavorite,
+                )
+            }
         }
     } else {
         Box(
@@ -223,10 +249,52 @@ fun MineScreen() {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("我的", style = MaterialTheme.typography.titleMedium)
-                Text("版本 1.0.0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("版本 ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("一个逐步扩展的手机工具箱", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MoviesToolCard(
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onSetFavorite: (Boolean) -> Unit,
+) {
+    var showFavoriteDialog by remember { mutableStateOf(false) }
+
+    ToolCard(
+        title = "影视",
+        subtitle = "内嵌影视站点浏览",
+        status = if (isFavorite) "已收藏" else "WebView",
+        icon = Icons.Default.Movie,
+        onClick = onClick,
+        onLongClick = { showFavoriteDialog = true },
+    )
+
+    if (showFavoriteDialog) {
+        AlertDialog(
+            onDismissRequest = { showFavoriteDialog = false },
+            title = { Text(if (isFavorite) "取消收藏" else "收藏功能") },
+            text = { Text(if (isFavorite) "是否取消收藏“影视”？" else "是否收藏“影视”？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSetFavorite(!isFavorite)
+                        showFavoriteDialog = false
+                    },
+                ) {
+                    Text(if (isFavorite) "取消收藏" else "收藏")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFavoriteDialog = false }) {
+                    Text("关闭")
+                }
+            },
+        )
     }
 }
 

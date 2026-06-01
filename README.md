@@ -1,32 +1,95 @@
 # 我的
 
-一个基于 Android Kotlin 和 Jetpack Compose 开发的工具箱应用。目前第一个完整功能是「备份与恢复」，用于提取手机应用安装包、备份到百度网盘，并在需要时下载恢复。
+`我的` is an Android Kotlin / Jetpack Compose toolbox app. Current version: `1.1`.
 
-## 功能特点
+## Features
 
-- 底部三栏：首页「功能」、常用入口「收藏」、个人页「我的」。
-- 功能页目前提供「备份与恢复」工具。
-- 长按功能卡片可以收藏或取消收藏，收藏后的工具会显示在收藏页。
-- 备份功能可以读取手机已安装应用，选择应用后提取 APK。
-- 备份文件会上传到百度网盘，文件名包含应用名、包名和版本号。
-- 同一个应用的不同版本会分别保存。
-- 相同版本再次备份时，可在设置中选择「覆盖」或「另存一份」。
-- 备份和恢复过程支持通知栏进度显示。
-- 恢复页面会按应用聚合已备份的安装包，并列出不同版本。
-- 恢复支持两种方式：
-  - 手动填写下载链接，并跳转浏览器下载。
-  - 从百度网盘下载 APK，并调用系统安装器安装。
-- 恢复页面支持按应用名、包名或版本号搜索。
-- 恢复页面右上角提供「已下载安装包」管理入口，可以查看、安装或删除已下载 APK。
-- 已下载安装包会显示应用图标、应用名、包名、版本、大小、时间和路径。
-- 恢复安装包默认保存到应用外部文件目录，也可以通过系统文件夹选择器自定义保存位置。
-- 百度网盘 API 配置放在「备份与恢复」的设置页，并提供获取 API 密钥的教程。
+- Toolbox home with three tabs: `功能`, `收藏`, and `我的`.
+- Long-press tool cards to favorite or unfavorite them.
+- Backup/restore tool for exporting installed APKs, backing them up to Baidu Pan, downloading backups, and installing restored APKs.
+- Movie tool that embeds `https://www.hhkan0.com/` in a WebView for user-initiated browsing.
+- Startup update check against [AOthers/Mine GitHub releases](https://github.com/AOthers/Mine/releases).
 
-## 截图
+## Backup And Restore
 
-后续可以在这里补充应用截图。
+The backup/restore tool supports:
 
-## 构建环境
+- Listing installed apps and extracting selected APKs.
+- Uploading APK backups to a configurable Baidu Pan directory.
+- Backup filenames in this format:
+
+```text
+<app-name>_<package-name>_<version>.apk
+```
+
+- Compatibility with older backup filenames:
+
+```text
+<package-name>_<version>.apk
+```
+
+- Same-version handling:
+  - `OVERWRITE`
+  - `SAVE_AS_COPY`, appending `_copy-yyyyMMddHHmmss` before `.apk`
+- Remote restore search by app name, package name, and version.
+- Downloaded APK management with icon, app name, package, version, size, modified time, and path/URI.
+- Default restore downloads under the app external files `restored_apks` directory.
+- Optional restore download folder selection through Android SAF.
+- Notification progress for backup and restore downloads.
+
+## Movie WebView
+
+The movie tool opens `https://www.hhkan0.com/` inside the app.
+
+It provides:
+
+- Back, refresh, home, and external-browser actions.
+- Loading progress.
+- In-app handling for site navigation.
+- Retry and browser-open actions on load failure.
+
+The app does not parse playback sources, bypass site restrictions, or scrape protected content.
+
+## Updates
+
+On app startup, the app checks:
+
+```text
+https://api.github.com/repos/AOthers/Mine/releases/latest
+```
+
+If the latest release tag is newer than `BuildConfig.VERSION_NAME`, the app shows an update dialog with:
+
+- Update
+- Skip this update
+- Cancel
+
+The update action downloads the first `.apk` asset from the release and hands it to Android's installer.
+
+## Baidu Pan Setup
+
+Before using Baidu Pan backup/restore, create an app in the Baidu Pan open platform and configure:
+
+- AppKey
+- SecretKey
+
+OAuth callback:
+
+```text
+wode://baidu.oauth
+```
+
+Default remote backup directory:
+
+```text
+/apps/AppBackup
+```
+
+The remote directory can be changed in the backup/restore settings page.
+
+## Build
+
+Requirements:
 
 - Android Studio
 - JDK 17
@@ -34,106 +97,66 @@
 - Kotlin
 - Jetpack Compose
 
-项目中的 `gradle.properties` 已指定 JDK 17 路径：
+`gradle.properties` currently pins JDK 17:
 
 ```properties
 org.gradle.java.home=C:/Program Files/Java/jdk-17
 ```
 
-如果你的本机 JDK 路径不同，需要改成自己的路径，或者删除这一行并使用 Android Studio 配置的 JDK。
-
-## 调试包
-
-运行：
+Build debug APK:
 
 ```powershell
 .\gradlew.bat assembleDebug
 ```
 
-生成位置：
+Output:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## 发布包
+## Release Build
 
-项目支持 release 签名配置，但签名文件不会提交到仓库。
-
-本地需要准备：
+Release signing is configured through local files:
 
 ```text
 mine-release.jks
 keystore.properties
 ```
 
-`keystore.properties` 示例：
+`keystore.properties` example:
 
 ```properties
 storeFile=mine-release.jks
-storePassword=你的密钥库密码
+storePassword=your-store-password
 keyAlias=mine
-keyPassword=你的密钥密码
+keyPassword=your-key-password
 ```
 
-然后运行：
+Build release APK:
 
 ```powershell
 .\gradlew.bat assembleRelease
 ```
 
-生成位置：
+Output:
 
 ```text
 app/build/outputs/apk/release/app-release.apk
 ```
 
-## 百度网盘配置
+## Code Map
 
-使用百度网盘备份和恢复前，需要先在百度网盘开放平台创建应用，并获取：
+- `MainActivity.kt`: screen coordination, Activity integrations, update dialog, installer handoff, and system back.
+- `ToolboxScreens.kt`: toolbox tabs, tool cards, favorites, and app info.
+- `MovieWebScreen.kt`: embedded movie WebView.
+- `SettingsScreen.kt`: Baidu Pan settings, backup path, restore folder, and same-version strategy.
+- `BackupViewModel.kt`: backup/restore workflows and local/remote APK state.
+- `BaiduPanService.kt`: Baidu Pan OAuth and file APIs.
+- `UpdateService.kt`: GitHub release check and APK download.
+- `FavoriteStore.kt`: persisted tool favorites.
+- `TokenStore.kt`: persisted credentials, tokens, paths, and restore strategy.
 
-- AppKey
-- SecretKey
+## License
 
-OAuth 回调地址填写：
-
-```text
-wode://baidu.oauth
-```
-
-在应用中进入「备份与恢复」设置页，填写 AppKey 和 SecretKey 后点击保存并授权。授权成功后会自动回到「备份与恢复」页面。
-
-默认网盘备份目录：
-
-```text
-/apps/AppBackup
-```
-
-这个路径可以在设置页中自定义。
-
-## 代码结构
-
-- `MainActivity.kt`：页面协调、OAuth 回调、文件夹选择、APK 安装、通知权限和系统返回处理。
-- `ToolboxScreens.kt`：工具箱首页、底部导航、收藏逻辑和备份恢复入口。
-- `AppListScreen.kt`：备份时的已安装应用列表。
-- `BackupScreen.kt`：备份进度页面。
-- `RestoreScreen.kt`：恢复列表、搜索、版本选择、手动链接和已下载 APK 管理。
-- `SettingsScreen.kt`：百度网盘配置、授权、网盘路径、恢复保存位置、同版本处理策略和教程。
-- `BackupViewModel.kt`：备份、上传、恢复、下载、本地 APK 管理和进度通知。
-- `BaiduPanService.kt`：百度网盘 OAuth、上传、列表、文件信息和下载接口。
-- `TokenStore.kt`：加密保存 Token、API 配置、备份路径、恢复路径和备份策略。
-- `FavoriteStore.kt`：本地收藏状态。
-- `RestoreLinkStore.kt`：按包名保存手动恢复链接。
-- `ProgressNotifier.kt`：通知栏进度。
-- `RestoreTarget.kt`：普通文件路径和 SAF 文件夹输出的统一封装。
-
-## 后续计划
-
-- 手动链接恢复支持应用内下载。
-- 增加 Wi-Fi 下自动备份或批量备份策略。
-- 收藏页支持排序。
-- 工具箱继续增加更多实用工具。
-
-## 开源协议
-
-暂未指定协议。发布正式开源版本前，建议补充 `LICENSE` 文件。
+No license has been specified yet. Add a `LICENSE` file before publishing a formal open-source release.

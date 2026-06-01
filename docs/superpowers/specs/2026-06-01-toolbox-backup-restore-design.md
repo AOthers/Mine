@@ -1,35 +1,31 @@
-# Toolbox Backup/Restore Design
-
-## Goal
-
-Ship a usable toolbox app named "我的" with the first tool, "备份与恢复", completed end to end.
+# Toolbox App Design Notes
 
 ## Home Structure
 
 The app has three bottom tabs:
 
-- "功能": shows available tools.
-- "收藏": shows tools the user has favorited.
-- "我的": lightweight app/profile information.
+- `功能`: available tools.
+- `收藏`: tools the user has favorited.
+- `我的`: lightweight app information.
 
-"备份与恢复" is the first tool card. Long-pressing the card opens a dialog:
+Current tool cards:
 
-- If not favorited, offer "收藏".
-- If already favorited, offer "取消收藏".
+- `备份与恢复`
+- `影视`
 
-The favorite state is local and persistent.
+Long-pressing a card opens a favorite/unfavorite dialog. Favorite state is local and persistent.
 
-## Backup/Restore Tool Page
+## Backup/Restore Tool
 
-The tool page contains:
+The backup/restore page contains:
 
-- Baidu Pan status card with "管理/去配置" action.
-- "备份应用" entry.
-- "恢复应用" entry.
+- Baidu Pan status card with a manage/configure action.
+- `备份应用` entry.
+- `恢复应用` entry.
 
-There is no top-right settings gear on this page. Settings are reached through the status card.
+There is no top-right settings gear. Settings are reached through the status card.
 
-## Settings
+## Backup/Restore Settings
 
 The settings page contains:
 
@@ -45,6 +41,7 @@ Restore folder behavior:
 - User can choose a folder through Android's system folder picker.
 - A chosen folder is stored as a persisted SAF tree URI.
 - Downloads, downloaded-APK listing, deletion, and installation handoff must work for both default file paths and SAF tree URIs.
+- The displayed restore folder should be readable to the user and should not misrepresent a SAF URI as a literal filesystem path.
 
 ## Backup Behavior
 
@@ -63,6 +60,8 @@ Different app versions coexist naturally. Same-version behavior:
 
 Backup progress appears both in the app and in the notification shade.
 
+When the remote backup path changes, refreshing records must clear the old list immediately and discard late results from the old path.
+
 ## Restore Behavior
 
 Restore reads remote backups from Baidu Pan, groups them by package/app, and supports search by:
@@ -79,33 +78,48 @@ Each app opens a dialog with:
 
 Baidu Pan restore downloads the selected APK, saves it locally, shows notification progress, and starts Android's installer.
 
-## Downloaded APK Manager
+## Movie WebView
 
-The restore page has a top-right download icon. It opens the downloaded APK manager.
+The `影视` tool opens `https://www.hhkan0.com/` inside an Android WebView.
 
-Each downloaded APK row shows:
+Controls:
 
-- APK icon
-- app name
-- package name
-- version
-- size
-- modified time
-- path/URI
+- Back
+- Refresh
+- Home
+- Open in external browser
 
-The user can delete downloaded APKs from this dialog.
+Behavior:
+
+- JavaScript and DOM storage are enabled.
+- Normal site navigation stays inside the WebView.
+- Loading progress is visible.
+- Load failures show retry and external-browser actions.
+- Android back first goes back in WebView history, then returns to the toolbox.
+- The app does not parse content, extract playback URLs, or bypass site restrictions.
+
+## Update Check
+
+The app checks GitHub releases on startup:
+
+```text
+https://api.github.com/repos/AOthers/Mine/releases/latest
+```
+
+Behavior:
+
+- Compare latest release tag against `BuildConfig.VERSION_NAME`.
+- Ignore a leading `v` in tags.
+- If newer, show update, skip-this-update, and cancel actions.
+- Update downloads the first `.apk` release asset and hands it to Android's installer.
+- Skipped tags are stored locally and should not prompt again for the same tag.
 
 ## Navigation Rules
 
-- "收藏" or "我的" returns to "功能" on system back.
-- "备份与恢复" returns to "功能".
-- Backup, restore, settings, and progress pages return to "备份与恢复".
-- Only the top-level "功能" page exits the app.
+- `收藏` or `我的` returns to `功能` on system back.
+- `备份与恢复` returns to `功能`.
+- Backup, restore, settings, and progress pages return to `备份与恢复`.
+- `影视` uses WebView history first, then returns to `功能`.
+- Only the top-level `功能` page exits the app.
 
-OAuth success returns to "备份与恢复" and refreshes backup records.
-
-## Follow-Up Work
-
-- Manual-link restore can become in-app APK download later.
-- Backup strategy can add skip-existing-version, batch overwrite prompts, and Wi-Fi-only upload.
-- Favorites can support ordering after more tools exist.
+OAuth success returns to `备份与恢复` and refreshes backup records.

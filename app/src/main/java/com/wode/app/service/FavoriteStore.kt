@@ -15,5 +15,6 @@ class FavoriteStore(context: Context) {
 
     companion object {
         const val TOOL_BACKUP_RESTORE = "backup_restore"
+        const val TOOL_MOVIES = "movies"
     }
 }

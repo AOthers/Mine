@@ -107,10 +107,14 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
     private val _restoredApks = MutableStateFlow<List<RestoredApk>>(emptyList())
     val restoredApks: StateFlow<List<RestoredApk>> = _restoredApks.asStateFlow()
 
+    private val _restoreDisplayPath = MutableStateFlow(buildRestoreDisplayPath())
+    val restoreDisplayPath: StateFlow<String> = _restoreDisplayPath.asStateFlow()
+
     private val _installEvents = MutableSharedFlow<InstallEvent>()
     val installEvents: SharedFlow<InstallEvent> = _installEvents.asSharedFlow()
 
     private var backupJob: Job? = null
+    private var loadingBackupPath: String? = null
 
     fun startBackup(apps: List<AppInfo>) {
         if (_uiState.value.isRunning) return
@@ -207,13 +211,21 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
 
     fun saveRestoreTreeUri(uri: Uri) {
         tokenStore.saveRestoreTreeUri(uri.toString())
+        _restoreDisplayPath.value = buildRestoreDisplayPath()
         loadRestoredApks()
     }
 
     fun loadBackupRecords() {
         viewModelScope.launch {
+            val backupPath = tokenStore.getBackupPath()
+            loadingBackupPath = backupPath
+            _backupRecords.value = emptyList()
+
             val token = getValidToken() ?: return@launch
-            panService.listBackupFiles(token, tokenStore.getBackupPath()).onSuccess { files ->
+            panService.listBackupFiles(token, backupPath).onSuccess { files ->
+                if (loadingBackupPath != backupPath || tokenStore.getBackupPath() != backupPath) {
+                    return@onSuccess
+                }
                 _backupRecords.value = files
                     .filter { it.isDir != 1 }
                     .map { file ->
@@ -291,6 +303,10 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         val treeUri = tokenStore.getRestoreTreeUri()
         if (treeUri.isNotBlank()) return treeUri
         return resolveRestoreDirectory().absolutePath
+    }
+
+    fun refreshRestoreDisplayPath() {
+        _restoreDisplayPath.value = buildRestoreDisplayPath()
     }
 
     fun loadRestoredApks() {
@@ -498,6 +514,37 @@ class BackupViewModel(application: Application) : AndroidViewModel(application) 
         val dir = File(rawPath)
         return if (dir.isAbsolute) dir else File(getApplication<Application>().getExternalFilesDir(null), rawPath)
             .also { it.mkdirs() }
+    }
+
+    private fun buildRestoreDisplayPath(): String {
+        val treeUri = tokenStore.getRestoreTreeUri()
+        if (treeUri.isNotBlank()) {
+            return formatTreeUriForDisplay(treeUri)
+        }
+        return formatLocalPathForDisplay(resolveRestoreDirectory().absolutePath)
+    }
+
+    private fun formatLocalPathForDisplay(path: String): String {
+        val normalized = path.replace("\\", "/")
+        val androidIndex = normalized.indexOf("/Android/", ignoreCase = true)
+        if (androidIndex >= 0) {
+            return normalized.substring(androidIndex + 1)
+        }
+        return normalized.substringAfter("/storage/emulated/0/", normalized)
+    }
+
+    private fun formatTreeUriForDisplay(uriString: String): String {
+        val uri = Uri.parse(uriString)
+        val treeId = uri.encodedPath
+            ?.substringAfter("/tree/", "")
+            ?.substringBefore("/")
+            .orEmpty()
+        val decoded = Uri.decode(treeId)
+            .removePrefix("primary:")
+            .replace(":", "/")
+            .trim('/')
+        if (decoded.isBlank()) return "已选择的系统文件夹"
+        return decoded
     }
 
     override fun onCleared() {
