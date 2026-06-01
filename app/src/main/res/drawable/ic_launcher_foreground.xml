@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 空白占位图标：白色圆角矩形 -->
+    <path
+        android:fillColor="#F5F5F5"
+        android:pathData="M24,24 L84,24 Q90,24 90,30 L90,78 Q90,84 84,84 L24,84 Q18,84 18,78 L18,30 Q18,24 24,24 Z" />
+    <!-- 字母 W -->
+    <path
+        android:fillColor="#CCCCCC"
+        android:pathData="M36,40 L42,60 L48,50 L54,60 L60,40 L58,40 L54,56 L48,45 L42,56 L38,40 Z" />
+</vector>

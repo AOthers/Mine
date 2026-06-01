@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">应用备份</string>
+    <string name="app_list_title">应用备份</string>
+    <string name="backup_title">备份进度</string>
+    <string name="settings_title">设置</string>
+</resources>
