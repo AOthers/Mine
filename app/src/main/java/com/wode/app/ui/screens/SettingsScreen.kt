@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +65,7 @@ fun SettingsScreen(
     var backupPath by remember { mutableStateOf(tokenStore.getBackupPath()) }
     var actualRestorePath by remember { mutableStateOf(viewModel.getRestorePath()) }
     var sameVersionStrategy by remember { mutableStateOf(tokenStore.getSameVersionStrategy()) }
+    var showApiTutorial by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -72,6 +74,11 @@ fun SettingsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { showApiTutorial = true }) {
+                        Text("教程")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -305,6 +312,10 @@ fun SettingsScreen(
             }
         }
     }
+
+    if (showApiTutorial) {
+        ApiKeyTutorialDialog(onDismiss = { showApiTutorial = false })
+    }
 }
 
 @Composable
@@ -331,4 +342,26 @@ private fun StrategyRow(
             )
         }
     }
+}
+
+@Composable
+private fun ApiKeyTutorialDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("获取 API 密钥教程") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("1. 打开百度网盘开放平台，登录你的百度账号。")
+                Text("2. 创建一个应用，应用类型选择适合个人使用的网盘应用。")
+                Text("3. 在应用配置里找到 AppKey 和 SecretKey，并复制到本页面。")
+                Text("4. OAuth 回调地址填写：wode://baidu.oauth")
+                Text("5. 回到本页面，点击“保存并授权”，浏览器授权成功后会自动回到应用。")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了")
+            }
+        },
+    )
 }
