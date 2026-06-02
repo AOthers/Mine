@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 class UpdateService(private val context: Context) {
     private val prefs = context.getSharedPreferences("wode_update", Context.MODE_PRIVATE)
@@ -29,38 +30,63 @@ class UpdateService(private val context: Context) {
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "Wode-App/${BuildConfig.VERSION_NAME}")
                 .build()
-            val response = client.newCall(request).execute()
-            response.use {
-                if (!it.isSuccessful) {
-                    return@withContext Result.failure(Exception("检查更新失败：HTTP ${it.code}"))
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    if (response.code == 403) {
+                        return@withContext checkForUpdateFromReleasePage(ignoreSkipped)
+                    }
+                    return@withContext Result.failure(Exception("检查更新失败：HTTP ${response.code}"))
                 }
-                val release = gson.fromJson(it.body?.string().orEmpty(), GitHubRelease::class.java)
+
+                val release = gson.fromJson(response.body?.string().orEmpty(), GitHubRelease::class.java)
                 val asset = release.assets.firstOrNull { asset ->
                     asset.name.endsWith(".apk", ignoreCase = true)
-                } ?: return@withContext Result.success(null)
-
-                val latestVersion = release.tagName.trim().removePrefix("v").removePrefix("V")
-                if (!isNewerVersion(latestVersion, BuildConfig.VERSION_NAME)) {
-                    return@withContext Result.success(null)
-                }
-                if (!ignoreSkipped && prefs.getString(KEY_SKIPPED_TAG, "") == release.tagName) {
-                    return@withContext Result.success(null)
-                }
+                } ?: return@withContext checkForUpdateFromReleasePage(ignoreSkipped)
 
                 Result.success(
-                    UpdateInfo(
-                        versionName = latestVersion,
-                        tagName = release.tagName,
-                        releaseName = release.name.ifBlank { release.tagName },
-                        body = release.body,
+                    release.toUpdateInfoOrNull(
+                        ignoreSkipped = ignoreSkipped,
                         apkName = asset.name,
                         apkDownloadUrl = asset.browserDownloadUrl,
-                        htmlUrl = release.htmlUrl,
                     ),
                 )
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun checkForUpdateFromReleasePage(ignoreSkipped: Boolean): Result<UpdateInfo?> {
+        val request = Request.Builder()
+            .url(LATEST_RELEASE_PAGE)
+            .header("User-Agent", "Wode-App/${BuildConfig.VERSION_NAME}")
+            .build()
+        return client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                return@use Result.failure(Exception("检查更新失败：HTTP ${response.code}"))
+            }
+            val tagName = response.latestReleaseTag()
+                ?: return@use Result.failure(Exception("检查更新失败：无法识别最新版本"))
+            val latestVersion = tagName.trim().removePrefix("v").removePrefix("V")
+            if (!isNewerVersion(latestVersion, BuildConfig.VERSION_NAME)) {
+                return@use Result.success(null)
+            }
+            if (!ignoreSkipped && prefs.getString(KEY_SKIPPED_TAG, "") == tagName) {
+                return@use Result.success(null)
+            }
+
+            val apkName = "Mine-$tagName.apk"
+            Result.success(
+                UpdateInfo(
+                    versionName = latestVersion,
+                    tagName = tagName,
+                    releaseName = tagName,
+                    body = "",
+                    apkName = apkName,
+                    apkDownloadUrl = "$RELEASE_DOWNLOAD_BASE/$tagName/$apkName",
+                    htmlUrl = "$RELEASE_TAG_BASE/$tagName",
+                ),
+            )
         }
     }
 
@@ -91,6 +117,40 @@ class UpdateService(private val context: Context) {
         prefs.edit().putString(KEY_SKIPPED_TAG, tagName).apply()
     }
 
+    private fun GitHubRelease.toUpdateInfoOrNull(
+        ignoreSkipped: Boolean,
+        apkName: String,
+        apkDownloadUrl: String,
+    ): UpdateInfo? {
+        val latestVersion = tagName.trim().removePrefix("v").removePrefix("V")
+        if (!isNewerVersion(latestVersion, BuildConfig.VERSION_NAME)) {
+            return null
+        }
+        if (!ignoreSkipped && prefs.getString(KEY_SKIPPED_TAG, "") == tagName) {
+            return null
+        }
+        return UpdateInfo(
+            versionName = latestVersion,
+            tagName = tagName,
+            releaseName = name.ifBlank { tagName },
+            body = body,
+            apkName = apkName,
+            apkDownloadUrl = apkDownloadUrl,
+            htmlUrl = htmlUrl,
+        )
+    }
+
+    private fun Response.latestReleaseTag(): String? {
+        val urlSegments = request.url.pathSegments
+        val tagIndex = urlSegments.indexOf("tag")
+        if (tagIndex >= 0 && tagIndex + 1 < urlSegments.size) {
+            return urlSegments[tagIndex + 1].takeIf { it.isNotBlank() }
+        }
+        return body?.string()
+            ?.let { html -> TAG_LINK_REGEX.find(html)?.groupValues?.getOrNull(1) }
+            ?.takeIf { it.isNotBlank() }
+    }
+
     private fun isNewerVersion(latest: String, current: String): Boolean {
         val latestParts = latest.split(".", "-", "_").map { it.toIntOrNull() ?: 0 }
         val currentParts = current.split(".", "-", "_").map { it.toIntOrNull() ?: 0 }
@@ -118,6 +178,10 @@ class UpdateService(private val context: Context) {
 
     companion object {
         private const val LATEST_RELEASE_API = "https://api.github.com/repos/AOthers/Mine/releases/latest"
+        private const val LATEST_RELEASE_PAGE = "https://github.com/AOthers/Mine/releases/latest"
+        private const val RELEASE_DOWNLOAD_BASE = "https://github.com/AOthers/Mine/releases/download"
+        private const val RELEASE_TAG_BASE = "https://github.com/AOthers/Mine/releases/tag"
         private const val KEY_SKIPPED_TAG = "skipped_tag"
+        private val TAG_LINK_REGEX = Regex("""/AOthers/Mine/releases/tag/([^"'<>]+)""")
     }
 }
