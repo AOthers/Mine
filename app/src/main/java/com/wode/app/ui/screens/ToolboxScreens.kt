@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.HomeRepairService
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SettingsBackupRestore
@@ -107,10 +108,13 @@ fun ToolboxHomeScreenContent(
     backupCount: Int,
     isBackupRestoreFavorite: Boolean,
     isMoviesFavorite: Boolean,
+    isMusicFavorite: Boolean,
     onOpenBackupRestore: () -> Unit,
     onOpenMovies: () -> Unit,
+    onOpenMusic: () -> Unit,
     onSetBackupRestoreFavorite: (Boolean) -> Unit,
     onSetMoviesFavorite: (Boolean) -> Unit,
+    onSetMusicFavorite: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -144,6 +148,12 @@ fun ToolboxHomeScreenContent(
             onClick = onOpenMovies,
             onSetFavorite = onSetMoviesFavorite,
         )
+        Spacer(Modifier.height(14.dp))
+        MusicToolCard(
+            isFavorite = isMusicFavorite,
+            onClick = onOpenMusic,
+            onSetFavorite = onSetMusicFavorite,
+        )
     }
 }
 
@@ -151,14 +161,17 @@ fun ToolboxHomeScreenContent(
 fun FavoritesScreen(
     isBackupRestoreFavorite: Boolean,
     isMoviesFavorite: Boolean,
+    isMusicFavorite: Boolean,
     backupCount: Int,
     isBaiduAuthorized: Boolean,
     onOpenBackupRestore: () -> Unit,
     onOpenMovies: () -> Unit,
+    onOpenMusic: () -> Unit,
     onSetBackupRestoreFavorite: (Boolean) -> Unit,
     onSetMoviesFavorite: (Boolean) -> Unit,
+    onSetMusicFavorite: (Boolean) -> Unit,
 ) {
-    if (isBackupRestoreFavorite || isMoviesFavorite) {
+    if (isBackupRestoreFavorite || isMoviesFavorite || isMusicFavorite) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -187,6 +200,16 @@ fun FavoritesScreen(
                     isFavorite = true,
                     onClick = onOpenMovies,
                     onSetFavorite = onSetMoviesFavorite,
+                )
+            }
+            if ((isBackupRestoreFavorite || isMoviesFavorite) && isMusicFavorite) {
+                Spacer(Modifier.height(14.dp))
+            }
+            if (isMusicFavorite) {
+                MusicToolCard(
+                    isFavorite = true,
+                    onClick = onOpenMusic,
+                    onSetFavorite = onSetMusicFavorite,
                 )
             }
         }
@@ -279,6 +302,48 @@ private fun MoviesToolCard(
             onDismissRequest = { showFavoriteDialog = false },
             title = { Text(if (isFavorite) "取消收藏" else "收藏功能") },
             text = { Text(if (isFavorite) "是否取消收藏“影视”？" else "是否收藏“影视”？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSetFavorite(!isFavorite)
+                        showFavoriteDialog = false
+                    },
+                ) {
+                    Text(if (isFavorite) "取消收藏" else "收藏")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFavoriteDialog = false }) {
+                    Text("关闭")
+                }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MusicToolCard(
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onSetFavorite: (Boolean) -> Unit,
+) {
+    var showFavoriteDialog by remember { mutableStateOf(false) }
+
+    ToolCard(
+        title = "音乐",
+        subtitle = "识别本地音乐，播放并显示歌词",
+        status = if (isFavorite) "已收藏" else "本地音乐",
+        icon = Icons.Default.MusicNote,
+        onClick = onClick,
+        onLongClick = { showFavoriteDialog = true },
+    )
+
+    if (showFavoriteDialog) {
+        AlertDialog(
+            onDismissRequest = { showFavoriteDialog = false },
+            title = { Text(if (isFavorite) "取消收藏" else "收藏功能") },
+            text = { Text(if (isFavorite) "是否取消收藏“音乐”？" else "是否收藏“音乐”？") },
             confirmButton = {
                 TextButton(
                     onClick = {

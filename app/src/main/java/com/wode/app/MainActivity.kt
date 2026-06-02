@@ -38,6 +38,7 @@ import com.wode.app.ui.screens.BackupScreen
 import com.wode.app.ui.screens.FavoritesScreen
 import com.wode.app.ui.screens.MineScreen
 import com.wode.app.ui.screens.MovieWebScreen
+import com.wode.app.ui.screens.MusicScreen
 import com.wode.app.ui.screens.normalizeMovieUrl
 import com.wode.app.ui.screens.RestoreScreen
 import com.wode.app.ui.screens.SettingsScreen
@@ -47,6 +48,7 @@ import com.wode.app.ui.theme.WodeTheme
 import com.wode.app.viewmodel.AppListViewModel
 import com.wode.app.viewmodel.BackupViewModel
 import com.wode.app.viewmodel.InstallEvent
+import com.wode.app.viewmodel.MusicViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -61,8 +63,10 @@ class MainActivity : ComponentActivity() {
     private var latestIntent by mutableStateOf<Intent?>(null)
     private var pendingAppKey: String? = null
     private var backupViewModelRef: BackupViewModel? = null
+    private var musicViewModelRef: MusicViewModel? = null
     private var isBackupRestoreFavorite by mutableStateOf(false)
     private var isMoviesFavorite by mutableStateOf(false)
+    private var isMusicFavorite by mutableStateOf(false)
     private var pendingUpdate by mutableStateOf<UpdateInfo?>(null)
     private var isDownloadingUpdate by mutableStateOf(false)
 
@@ -79,6 +83,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val chooseMusicFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+            musicViewModelRef?.addFolder(uri, hasAudioPermission())
+            Toast.makeText(this, "音乐文件夹已添加", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        musicViewModelRef?.loadLibrary(granted)
+    }
+
     sealed class Screen {
         data class Main(val tab: MainTab) : Screen()
         object BackupRestoreHome : Screen()
@@ -87,6 +110,7 @@ class MainActivity : ComponentActivity() {
         object BackupProgress : Screen()
         object RestoreList : Screen()
         object MovieWeb : Screen()
+        object Music : Screen()
     }
 
     enum class MainTab { Tools, Favorites, Mine }
@@ -102,6 +126,7 @@ class MainActivity : ComponentActivity() {
         updateService = UpdateService(this)
         isBackupRestoreFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_BACKUP_RESTORE)
         isMoviesFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_MOVIES)
+        isMusicFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_MUSIC)
         latestIntent = intent
         requestNotificationPermissionIfNeeded()
 
@@ -109,7 +134,9 @@ class MainActivity : ComponentActivity() {
             WodeTheme {
                 val appListViewModel: AppListViewModel = viewModel()
                 val backupViewModel: BackupViewModel = viewModel()
+                val musicViewModel: MusicViewModel = viewModel()
                 backupViewModelRef = backupViewModel
+                musicViewModelRef = musicViewModel
 
                 val isAuthorized by backupViewModel.isAuthorized.collectAsState()
                 val backupRecords by backupViewModel.backupRecords.collectAsState()
@@ -151,6 +178,7 @@ class MainActivity : ComponentActivity() {
                                     backupCount = backupRecords.size,
                                     isBackupRestoreFavorite = isBackupRestoreFavorite,
                                     isMoviesFavorite = isMoviesFavorite,
+                                    isMusicFavorite = isMusicFavorite,
                                     onOpenBackupRestore = {
                                         backupViewModel.loadBackupRecords()
                                         currentScreen = Screen.BackupRestoreHome
@@ -158,14 +186,20 @@ class MainActivity : ComponentActivity() {
                                     onOpenMovies = {
                                         currentScreen = Screen.MovieWeb
                                     },
+                                    onOpenMusic = {
+                                        musicViewModel.loadLibrary(hasAudioPermission())
+                                        currentScreen = Screen.Music
+                                    },
                                     onSetBackupRestoreFavorite = ::updateBackupRestoreFavorite,
                                     onSetMoviesFavorite = ::updateMoviesFavorite,
+                                    onSetMusicFavorite = ::updateMusicFavorite,
                                 )
                             },
                             favoritesContent = {
                                 FavoritesScreen(
                                     isBackupRestoreFavorite = isBackupRestoreFavorite,
                                     isMoviesFavorite = isMoviesFavorite,
+                                    isMusicFavorite = isMusicFavorite,
                                     backupCount = backupRecords.size,
                                     isBaiduAuthorized = isAuthorized,
                                     onOpenBackupRestore = {
@@ -175,8 +209,13 @@ class MainActivity : ComponentActivity() {
                                     onOpenMovies = {
                                         currentScreen = Screen.MovieWeb
                                     },
+                                    onOpenMusic = {
+                                        musicViewModel.loadLibrary(hasAudioPermission())
+                                        currentScreen = Screen.Music
+                                    },
                                     onSetBackupRestoreFavorite = ::updateBackupRestoreFavorite,
                                     onSetMoviesFavorite = ::updateMoviesFavorite,
+                                    onSetMusicFavorite = ::updateMusicFavorite,
                                 )
                             },
                             mineContent = { MineScreen() },
@@ -264,6 +303,16 @@ class MainActivity : ComponentActivity() {
                             onOpenExternal = ::openMovieLink,
                         )
                     }
+
+                    Screen.Music -> {
+                        MusicScreen(
+                            viewModel = musicViewModel,
+                            onBack = { currentScreen = Screen.Main(MainTab.Tools) },
+                            onRefresh = { musicViewModel.loadLibrary(hasAudioPermission()) },
+                            onRequestPermission = ::requestAudioPermission,
+                            onAddFolder = { chooseMusicFolderLauncher.launch(null) },
+                        )
+                    }
                 }
 
                 pendingUpdate?.let { update ->
@@ -301,6 +350,7 @@ class MainActivity : ComponentActivity() {
             Screen.AppList -> currentScreen = Screen.BackupRestoreHome
             Screen.RestoreList -> currentScreen = Screen.BackupRestoreHome
             Screen.MovieWeb -> currentScreen = Screen.Main(MainTab.Tools)
+            Screen.Music -> currentScreen = Screen.Main(MainTab.Tools)
             Screen.BackupProgress -> {
                 appListViewModel.loadApps()
                 backupViewModel.loadBackupRecords()
@@ -422,6 +472,24 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun hasAudioPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestAudioPermission() {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        audioPermissionLauncher.launch(permission)
+    }
+
     private fun updateBackupRestoreFavorite(favorite: Boolean) {
         favoriteStore.setFavorite(FavoriteStore.TOOL_BACKUP_RESTORE, favorite)
         isBackupRestoreFavorite = favorite
@@ -431,6 +499,12 @@ class MainActivity : ComponentActivity() {
     private fun updateMoviesFavorite(favorite: Boolean) {
         favoriteStore.setFavorite(FavoriteStore.TOOL_MOVIES, favorite)
         isMoviesFavorite = favorite
+        Toast.makeText(this, if (favorite) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateMusicFavorite(favorite: Boolean) {
+        favoriteStore.setFavorite(FavoriteStore.TOOL_MUSIC, favorite)
+        isMusicFavorite = favorite
         Toast.makeText(this, if (favorite) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
     }
 
