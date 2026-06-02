@@ -22,7 +22,7 @@ class UpdateService(private val context: Context) {
         .followSslRedirects(true)
         .build()
 
-    suspend fun checkForUpdate(): Result<UpdateInfo?> = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(ignoreSkipped: Boolean = false): Result<UpdateInfo?> = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder()
                 .url(LATEST_RELEASE_API)
@@ -43,7 +43,7 @@ class UpdateService(private val context: Context) {
                 if (!isNewerVersion(latestVersion, BuildConfig.VERSION_NAME)) {
                     return@withContext Result.success(null)
                 }
-                if (prefs.getString(KEY_SKIPPED_TAG, "") == release.tagName) {
+                if (!ignoreSkipped && prefs.getString(KEY_SKIPPED_TAG, "") == release.tagName) {
                     return@withContext Result.success(null)
                 }
 

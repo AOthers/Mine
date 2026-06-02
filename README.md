@@ -1,6 +1,6 @@
 # 我的
 
-`我的` is an Android Kotlin / Jetpack Compose toolbox app. Current version: `1.1`.
+`我的` is an Android Kotlin / Jetpack Compose toolbox app. Current version: `1.2`.
 
 ## Features
 
@@ -8,7 +8,8 @@
 - Long-press tool cards to favorite or unfavorite them.
 - Backup/restore tool for exporting installed APKs, backing them up to Baidu Pan, downloading backups, and installing restored APKs.
 - Movie tool that embeds `https://www.hhkan0.com/` in a WebView for user-initiated browsing.
-- Startup update check against [AOthers/Mine GitHub releases](https://github.com/AOthers/Mine/releases).
+- Music player that scans system music or selected folders, supports local/online lyrics, and offers repeat/shuffle modes.
+- Startup and manual update checks against [AOthers/Mine GitHub releases](https://github.com/AOthers/Mine/releases).
 
 ## Backup And Restore
 
@@ -50,9 +51,23 @@ It provides:
 
 The app does not parse playback sources, bypass site restrictions, or scrape protected content.
 
+## Music Player
+
+The music tool supports:
+
+- One-tap system music recognition through Android `MediaStore`.
+- User-selected music folders through Android SAF, with folder add/remove management.
+- Fast folder rescans by caching recognized tracks and only rescanning when needed.
+- Sorting by name or modified time, in ascending or descending order.
+- Playback modes: repeat one, repeat list, and shuffle.
+- Lyric lookup from nearby `.lrc` files, embedded audio metadata, and online LRCLIB search.
+- A fixed-height lyric strip with marquee scrolling for long current lines.
+
+Online lyrics are looked up on demand and are not cached by default.
+
 ## Updates
 
-On app startup, the app checks:
+On app startup, and when the user taps `检查更新` in the `我的` tab, the app checks:
 
 ```text
 https://api.github.com/repos/AOthers/Mine/releases/latest
@@ -65,6 +80,8 @@ If the latest release tag is newer than `BuildConfig.VERSION_NAME`, the app show
 - Cancel
 
 The update action downloads the first `.apk` asset from the release and hands it to Android's installer.
+
+Manual update checks ignore the "skip this update" choice so the user can retry a skipped release.
 
 ## Baidu Pan Setup
 
@@ -150,8 +167,13 @@ app/build/outputs/apk/release/app-release.apk
 - `MainActivity.kt`: screen coordination, Activity integrations, update dialog, installer handoff, and system back.
 - `ToolboxScreens.kt`: toolbox tabs, tool cards, favorites, and app info.
 - `MovieWebScreen.kt`: embedded movie WebView.
+- `MusicScreen.kt`: music player UI, source/folder dialogs, sorting, lyrics, and controls.
 - `SettingsScreen.kt`: Baidu Pan settings, backup path, restore folder, and same-version strategy.
 - `BackupViewModel.kt`: backup/restore workflows and local/remote APK state.
+- `MusicViewModel.kt`: music library scans, playback state, lyric lookup, sort state, and source management.
+- `MusicLibraryService.kt`: `MediaStore` and SAF folder music discovery.
+- `MusicStore.kt`: persisted music sources, sort mode, and folder track cache.
+- `OnlineLyricsService.kt`: LRCLIB lyric search and synced/plain lyric retrieval.
 - `BaiduPanService.kt`: Baidu Pan OAuth and file APIs.
 - `UpdateService.kt`: GitHub release check and APK download.
 - `FavoriteStore.kt`: persisted tool favorites.

@@ -15,6 +15,7 @@ object LyricParser {
                     emptySequence()
                 } else {
                     val text = timestampRegex.replace(rawLine, "").trim()
+                    if (text.isBlank() || text.equals("null", ignoreCase = true)) return@flatMap emptySequence()
                     matches.asSequence().mapNotNull { match ->
                         parseTimestamp(match)?.let { timeMs -> LyricLine(timeMs, text) }
                     }
@@ -28,7 +29,8 @@ object LyricParser {
 
     fun parseEmbeddedLyrics(content: String): Lyrics {
         val parsed = parseLrc(content)
-        return if (parsed.lines.isNotEmpty()) parsed else Lyrics(plainText = content.trim().ifEmpty { null })
+        val plainText = content.trim().takeUnless { it.isBlank() || it.equals("null", ignoreCase = true) }
+        return if (parsed.lines.isNotEmpty()) parsed else Lyrics(plainText = plainText)
     }
 
     private fun parseTimestamp(match: MatchResult): Long? {

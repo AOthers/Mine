@@ -1,36 +1,47 @@
 package com.wode.app.ui.screens
 
 import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -42,19 +53,24 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wode.app.data.MusicSource
 import com.wode.app.data.MusicTrack
 import com.wode.app.viewmodel.FolderSource
+import com.wode.app.viewmodel.MusicSortMode
 import com.wode.app.viewmodel.MusicViewModel
+import com.wode.app.viewmodel.PlayMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +82,16 @@ fun MusicScreen(
     onAddFolder: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     var showFolders by remember { mutableStateOf(false) }
+    var showSortDialog by remember { mutableStateOf(false) }
+    var showSources by remember { mutableStateOf(false) }
+
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -81,8 +106,14 @@ fun MusicScreen(
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "\u5237\u65b0")
                     }
+                    IconButton(onClick = { showSortDialog = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "\u5207\u6362\u6392\u5e8f")
+                    }
                     IconButton(onClick = { showFolders = true }) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "\u6587\u4ef6\u5939")
+                    }
+                    IconButton(onClick = { showSources = true }) {
+                        Icon(Icons.Default.LibraryMusic, contentDescription = "\u97f3\u4e50\u6765\u6e90")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -98,33 +129,24 @@ fun MusicScreen(
         ) {
             LyricStrip(current = state.currentLyric, next = state.nextLyric)
             Spacer(Modifier.height(12.dp))
-            PlayerControls(
-                title = state.currentTrack?.title ?: "\u672a\u64ad\u653e",
-                artist = state.currentTrack?.displayArtist ?: "\u9009\u62e9\u4e00\u9996\u6b4c\u66f2\u5f00\u59cb",
-                isPlaying = state.isPlaying,
-                positionMs = state.positionMs,
-                durationMs = state.durationMs,
-                onPrevious = viewModel::playPrevious,
-                onPlayPause = viewModel::togglePlayPause,
-                onNext = viewModel::playNext,
-                onSeek = viewModel::seekTo,
-            )
-            Spacer(Modifier.height(12.dp))
-            if (!state.hasAudioPermission) {
-                PermissionCard(onRequestPermission = onRequestPermission)
-                Spacer(Modifier.height(12.dp))
-            }
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
             }
             if (state.isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    "\u6b63\u5728\u626b\u63cf\u97f3\u4e50...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (state.tracks.isEmpty() && !state.isLoading) {
                 EmptyMusicState(onAddFolder = onAddFolder, onRequestPermission = onRequestPermission)
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     items(state.tracks, key = { it.id }) { track ->
                         TrackRow(
                             track = track,
@@ -134,6 +156,20 @@ fun MusicScreen(
                     }
                 }
             }
+            Spacer(Modifier.height(12.dp))
+            PlayerControls(
+                title = state.currentTrack?.title ?: "\u672a\u64ad\u653e",
+                artist = state.currentTrack?.displayArtist ?: "\u9009\u62e9\u4e00\u9996\u6b4c\u66f2\u5f00\u59cb",
+                isPlaying = state.isPlaying,
+                positionMs = state.positionMs,
+                durationMs = state.durationMs,
+                playMode = state.playMode,
+                onPrevious = viewModel::playPrevious,
+                onPlayPause = viewModel::togglePlayPause,
+                onNext = viewModel::playNext,
+                onSeek = viewModel::seekTo,
+                onCyclePlayMode = viewModel::cyclePlayMode,
+            )
         }
     }
 
@@ -146,32 +182,70 @@ fun MusicScreen(
             onClose = { showFolders = false },
         )
     }
+
+    if (showSortDialog) {
+        SortDialog(
+            selected = state.sortMode,
+            onSelect = {
+                viewModel.setSortMode(it)
+                showSortDialog = false
+            },
+            onClose = { showSortDialog = false },
+        )
+    }
+
+    if (showSources) {
+        SourceDialog(
+            isSystemLibraryEnabled = state.isSystemLibraryEnabled,
+            onToggleSystemLibrary = {
+                if (state.isSystemLibraryEnabled) {
+                    viewModel.disableSystemLibrary(state.hasAudioPermission)
+                } else {
+                    onRequestPermission()
+                }
+                showSources = false
+            },
+            onAddFolder = {
+                showSources = false
+                onAddFolder()
+            },
+            onClose = { showSources = false },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LyricStrip(current: String, next: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            current,
+            modifier = Modifier
+                .fillMaxWidth()
+                .basicMarquee(iterations = Int.MAX_VALUE),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+        )
+        if (next.isNotBlank()) {
             Text(
-                current,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                next,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .basicMarquee(iterations = Int.MAX_VALUE),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
             )
-            if (next.isNotBlank()) {
-                Text(
-                    next,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
     }
 }
@@ -183,10 +257,12 @@ private fun PlayerControls(
     isPlaying: Boolean,
     positionMs: Long,
     durationMs: Long,
+    playMode: PlayMode,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
+    onCyclePlayMode: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -220,26 +296,20 @@ private fun PlayerControls(
                 IconButton(onClick = onNext) {
                     Icon(Icons.Default.SkipNext, contentDescription = "\u4e0b\u4e00\u9996")
                 }
+                IconButton(onClick = onCyclePlayMode) {
+                    Icon(playMode.icon, contentDescription = playMode.label)
+                }
             }
         }
     }
 }
 
-@Composable
-private fun PermissionCard(onRequestPermission: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("\u6388\u6743\u540e\u53ef\u8bc6\u522b\u7cfb\u7edf\u97f3\u4e50", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onRequestPermission) {
-                Text("\u6388\u6743")
-            }
-        }
+private val PlayMode.icon: ImageVector
+    get() = when (this) {
+        PlayMode.SINGLE_LOOP -> Icons.Default.RepeatOne
+        PlayMode.LIST_LOOP -> Icons.Default.Repeat
+        PlayMode.SHUFFLE -> Icons.Default.Shuffle
     }
-}
 
 @Composable
 private fun EmptyMusicState(onAddFolder: () -> Unit, onRequestPermission: () -> Unit) {
@@ -248,8 +318,8 @@ private fun EmptyMusicState(onAddFolder: () -> Unit, onRequestPermission: () -> 
             Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Text("\u8fd8\u6ca1\u6709\u8bc6\u522b\u5230\u97f3\u4e50", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onRequestPermission) { Text("\u6388\u6743\u7cfb\u7edf\u97f3\u4e50") }
-                OutlinedButton(onClick = onAddFolder) { Text("\u6dfb\u52a0\u6587\u4ef6\u5939") }
+                OutlinedButton(onClick = onRequestPermission) { Text("\u4e00\u952e\u8bc6\u522b") }
+                OutlinedButton(onClick = onAddFolder) { Text("\u9009\u62e9\u6587\u4ef6\u5939") }
             }
         }
     }
@@ -288,39 +358,248 @@ private fun FolderDialog(
     onRemoveFolder: (Uri) -> Unit,
     onClose: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("\u97f3\u4e50\u6587\u4ef6\u5939") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (folders.isEmpty()) {
-                    Text("\u8fd8\u6ca1\u6709\u6dfb\u52a0\u81ea\u9009\u6587\u4ef6\u5939", style = MaterialTheme.typography.bodyMedium)
-                }
-                folders.forEach { folder ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(folder.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    AppBottomSheet(onDismiss = onClose) {
+        SheetHeader(
+            title = "\u97f3\u4e50\u6587\u4ef6\u5939",
+            subtitle = if (folders.isEmpty()) "\u8fd8\u6ca1\u6709\u6dfb\u52a0\u81ea\u9009\u6587\u4ef6\u5939" else "\u7ba1\u7406\u5df2\u9009\u7684\u97f3\u4e50\u76ee\u5f55",
+        )
+        Spacer(Modifier.height(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            folders.forEach { folder ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            folder.name,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         TextButton(onClick = { onRemoveFolder(folder.uri) }) {
                             Text("\u79fb\u9664")
                         }
                     }
                 }
-                if (!hasAudioPermission) {
-                    Text("\u7cfb\u7edf\u97f3\u4e50\u6388\u6743\u672a\u5f00\u542f\uff0c\u81ea\u9009\u6587\u4ef6\u5939\u4ecd\u53ef\u4f7f\u7528\u3002", style = MaterialTheme.typography.bodySmall)
+            }
+            if (!hasAudioPermission) {
+                Text("\u7cfb\u7edf\u97f3\u4e50\u6388\u6743\u672a\u5f00\u542f\uff0c\u81ea\u9009\u6587\u4ef6\u5939\u4ecd\u53ef\u4f7f\u7528\u3002", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        SheetActions(
+            primaryText = "\u6dfb\u52a0\u6587\u4ef6\u5939",
+            onPrimary = onAddFolder,
+            secondaryText = "\u5173\u95ed",
+            onSecondary = onClose,
+        )
+    }
+}
+
+@Composable
+private fun SourceDialog(
+    isSystemLibraryEnabled: Boolean,
+    onToggleSystemLibrary: () -> Unit,
+    onAddFolder: () -> Unit,
+    onClose: () -> Unit,
+) {
+    AppBottomSheet(onDismiss = onClose) {
+        SheetHeader(
+            title = "\u97f3\u4e50\u6765\u6e90",
+            subtitle = "\u9009\u62e9\u7cfb\u7edf\u97f3\u4e50\u6216\u81ea\u9009\u6587\u4ef6\u5939",
+        )
+        Spacer(Modifier.height(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SheetOptionRow(
+                icon = Icons.Default.LibraryMusic,
+                title = if (isSystemLibraryEnabled) "\u5173\u95ed\u7cfb\u7edf\u97f3\u4e50\u8bc6\u522b" else "\u4e00\u952e\u8bc6\u522b\u7cfb\u7edf\u97f3\u4e50",
+                subtitle = if (isSystemLibraryEnabled) "\u5f53\u524d\u5df2\u5f00\u542f" else "\u4ece\u624b\u673a\u5a92\u4f53\u5e93\u5feb\u901f\u8bfb\u53d6",
+                selected = isSystemLibraryEnabled,
+                onClick = onToggleSystemLibrary,
+            )
+            SheetOptionRow(
+                icon = Icons.Default.FolderOpen,
+                title = "\u9009\u62e9\u6587\u4ef6\u5939",
+                subtitle = "\u6dfb\u52a0\u6216\u626b\u63cf\u6307\u5b9a\u76ee\u5f55",
+                onClick = onAddFolder,
+            )
+        }
+        SheetActions(
+            secondaryText = "\u53d6\u6d88",
+            onSecondary = onClose,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortDialog(
+    selected: MusicSortMode,
+    onSelect: (MusicSortMode) -> Unit,
+    onClose: () -> Unit,
+) {
+    AppBottomSheet(onDismiss = onClose) {
+        SheetHeader(
+            title = "\u6392\u5e8f\u65b9\u5f0f",
+            subtitle = selected.label,
+        )
+        Spacer(Modifier.height(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            musicSortModes.forEach { mode ->
+                SheetOptionRow(
+                    icon = mode.icon,
+                    title = mode.label,
+                    selected = mode == selected,
+                    onClick = { onSelect(mode) },
+                )
+            }
+        }
+        SheetActions(
+            secondaryText = "\u53d6\u6d88",
+            onSecondary = onClose,
+        )
+    }
+}
+
+@Composable
+private fun SheetOptionRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                )
+                if (subtitle != null) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onAddFolder) {
-                Text("\u6dfb\u52a0\u6587\u4ef6\u5939")
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "\u5df2\u9009",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onClose) {
-                Text("\u5173\u95ed")
-            }
-        },
-    )
+        }
+    }
 }
+
+@Composable
+private fun SheetHeader(title: String, subtitle: String? = null) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.SemiBold,
+    )
+    if (subtitle != null) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SheetActions(
+    primaryText: String? = null,
+    onPrimary: (() -> Unit)? = null,
+    secondaryText: String,
+    onSecondary: () -> Unit,
+) {
+    Spacer(Modifier.height(10.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(
+            onClick = onSecondary,
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(secondaryText)
+        }
+        if (primaryText != null && onPrimary != null) {
+            TextButton(
+                onClick = onPrimary,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Text(primaryText)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppBottomSheet(
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            content = content,
+        )
+    }
+}
+
+private val musicSortModes = arrayOf(
+    MusicSortMode.NAME_ASC,
+    MusicSortMode.NAME_DESC,
+    MusicSortMode.MODIFIED_ASC,
+    MusicSortMode.MODIFIED_DESC,
+)
+
+private val MusicSortMode.icon: ImageVector
+    get() = when (this) {
+        MusicSortMode.NAME_ASC,
+        MusicSortMode.NAME_DESC -> Icons.AutoMirrored.Filled.Sort
+        MusicSortMode.MODIFIED_ASC,
+        MusicSortMode.MODIFIED_DESC -> Icons.Default.Refresh
+    }
 
 private fun formatDuration(durationMs: Long): String {
     val totalSeconds = (durationMs / 1000).coerceAtLeast(0)

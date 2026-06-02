@@ -81,4 +81,15 @@
 - [x] Run `./gradlew.bat testDebugUnitTest`; blocked by `ClassNotFoundException: com.wode.app.service.LyricParserTest` even though the test class is compiled under the Chinese workspace path.
 - [x] Run `./gradlew.bat assembleDebug`.
 - [x] Inspect `git diff` for unrelated changes.
-- [ ] Commit implementation.
+- [x] Commit implementation.
+
+### Post-Plan Iteration Summary
+
+After the initial plan, the music player gained:
+
+- Source management sheets for one-tap system music and selected folders.
+- Persisted sort mode with name/modified-time ascending and descending options.
+- Folder scan caching so reopening the music page does not force a slow rescan.
+- Playback modes for repeat one, repeat list, and shuffle.
+- Online LRCLIB lyric lookup without default caching.
+- A fixed-height lyric strip with marquee scrolling for long current lines.

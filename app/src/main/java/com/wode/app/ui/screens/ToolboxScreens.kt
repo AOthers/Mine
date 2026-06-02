@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SettingsBackupRestore
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -247,7 +248,9 @@ fun FavoritesScreen(
 }
 
 @Composable
-fun MineScreen() {
+fun MineScreen(
+    onCheckUpdate: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -276,6 +279,13 @@ fun MineScreen() {
                 Text("一个逐步扩展的手机工具箱", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        Spacer(Modifier.height(14.dp))
+        ActionCard(
+            title = "检查更新",
+            subtitle = "手动检查是否有新版本可用",
+            icon = Icons.Default.SystemUpdate,
+            onClick = onCheckUpdate,
+        )
     }
 }
 

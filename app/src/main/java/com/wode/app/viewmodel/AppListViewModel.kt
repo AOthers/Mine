@@ -30,10 +30,6 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedPackages = MutableStateFlow<Set<String>>(emptySet())
     val selectedPackages: StateFlow<Set<String>> = _selectedPackages.asStateFlow()
 
-    init {
-        loadApps()
-    }
-
     fun loadApps() {
         viewModelScope.launch {
             _isLoading.value = true
@@ -66,5 +62,4 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
         _selectedPackages.value = emptySet()
     }
 }
-
 

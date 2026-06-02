@@ -8,9 +8,11 @@ data class MusicTrack(
     val artist: String,
     val album: String,
     val durationMs: Long,
+    val modifiedTimeMs: Long,
     val uri: Uri,
     val source: MusicSource,
     val folderName: String? = null,
+    val folderRootUri: String? = null,
     val lyricUri: Uri? = null,
 ) {
     val displayArtist: String

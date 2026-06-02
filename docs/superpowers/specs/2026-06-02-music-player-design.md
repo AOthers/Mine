@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add a local music player tool to the existing toolbox app. The first version should discover music from the device's system media library, allow the user to add custom music folders, play common audio formats, and show lyrics fixed at the top of the in-app music page.
+Add a local music player tool to the existing toolbox app. The current version discovers music from the device's system media library, allows the user to add custom music folders, plays common audio formats, supports local and online lyrics, sorts the music list, and shows lyrics fixed at the top of the in-app music page.
 
 Global floating lyrics are out of scope for this version and should be kept as a follow-up plan.
 
@@ -37,6 +37,7 @@ User-selected folders:
 - Persist tree URI permissions with SAF.
 - Store selected folder URIs locally.
 - Scan each selected tree for supported audio files and sibling lyric files.
+- Cache recognized folder tracks so reopening the music page in the same process does not force another slow tree walk.
 - Let the user remove a selected folder from the music source list without deleting files.
 
 The combined library should deduplicate tracks by URI where possible. A refresh action reloads both system media and selected folder sources.
@@ -64,12 +65,13 @@ Use a focused music model separate from backup/restore state:
 - Artist
 - Album, when available
 - Duration
+- Modified time, when available
 - Content URI
 - Source type: system library or custom folder
 - Folder display name, when applicable
 - Optional lyric URI
 
-Music preferences should be stored separately from Baidu Pan and restore settings. The first version needs selected folder tree URIs. Last selected source/filter can be added later if the UI grows source filters.
+Music preferences should be stored separately from Baidu Pan and restore settings. Store selected folder tree URIs, whether the system library is enabled, the list sort mode, and cached folder scan results.
 
 ## Lyrics
 
@@ -77,6 +79,7 @@ Lyric lookup order:
 
 1. Find a sibling `.lrc` file with the same base filename as the audio file.
 2. If no `.lrc` file is found, try to read embedded lyric metadata from the audio file.
+3. If local lookup fails, search LRCLIB online by title, artist, and duration.
 
 `.lrc` behavior:
 
@@ -94,20 +97,24 @@ Embedded lyric behavior:
 
 If no lyrics exist, the fixed lyric area shows a calm empty state such as `暂无歌词`.
 
+Online lyric search is on demand and not cached by default. Blank, `null`, and bracket-only lyric lines should be ignored so the lyric strip does not flicker back to the empty state between timed lines.
+
 ## Music Screen UI
 
 The page uses a normal app screen, not a landing page.
 
 Top area:
 
-- A top app bar with back navigation, title `音乐`, refresh action, and folder-management action.
+- A top app bar with back navigation, title `音乐`, refresh action, sort action, folder-management action, and source action.
 - A fixed lyric strip immediately below the app bar.
 - The lyric strip remains at the top of the music page while the track list scrolls.
+- The lyric strip has a fixed height. Long current lines use marquee scrolling instead of resizing the page.
 
 Playback area:
 
 - Current track title and artist.
 - Playback controls: previous, play/pause, next.
+- Playback mode control: repeat one, repeat list, and shuffle.
 - A progress slider with elapsed and total duration.
 - A small error or empty state when the current track cannot be played.
 
@@ -115,6 +122,7 @@ Library area:
 
 - Scrollable track list.
 - Track rows show title, artist, duration, and source marker.
+- Sort options: name ascending/descending and modified time ascending/descending.
 - Tapping a track starts playback.
 - The currently playing track is visually distinguished.
 
@@ -132,7 +140,8 @@ Add new music-specific classes rather than expanding backup/restore classes:
 - `LyricLine` and parsed lyric result model.
 - `MusicLibraryService`: MediaStore query, SAF folder scanning, metadata extraction, and library merge.
 - `LyricParser`: `.lrc` and embedded lyric parsing helpers.
-- `MusicStore`: selected folder URI persistence and music preferences.
+- `MusicStore`: selected folder URI persistence, system source state, sort mode, folder track cache, and music preferences.
+- `OnlineLyricsService`: LRCLIB search and synced/plain lyric retrieval.
 - `MusicViewModel`: library state, current track, player state bridge, folder actions, and lyric state.
 - `MusicScreen`: Compose UI for playback, lyrics, library, and folder management.
 
@@ -151,6 +160,7 @@ Add new music-specific classes rather than expanding backup/restore classes:
 - Folder revoked or unreadable: keep the app running, mark the source unavailable, and allow removal.
 - Playback failure: show a concise message and keep the library usable.
 - Lyric parsing failure: fall back to `暂无歌词` without blocking playback.
+- Online lyric search failure: keep playback running and fall back to the local empty lyric state.
 
 ## Testing And Verification
 
@@ -169,6 +179,8 @@ Manual verification should include:
 - Adding and removing a SAF folder.
 - Playing at least one supported audio file.
 - Seeing top-fixed lyrics for a same-name `.lrc` file.
+- Seeing online lyrics when no local lyrics are available.
+- Confirming music sort mode persists after leaving and reopening the music screen.
 - Confirming Android back returns to the tools tab.
 
 ## Follow-Up Plan
@@ -176,8 +188,6 @@ Manual verification should include:
 Later versions can add:
 
 - Global floating lyrics with overlay permission.
-- Online lyric search and matching.
 - Manual lyric rematch.
 - Playlist and queue editing.
-- Shuffle and repeat modes.
 - Background playback notification controls.

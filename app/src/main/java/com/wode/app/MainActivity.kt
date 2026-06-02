@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private var isMusicFavorite by mutableStateOf(false)
     private var pendingUpdate by mutableStateOf<UpdateInfo?>(null)
     private var isDownloadingUpdate by mutableStateOf(false)
+    private var pendingEnableSystemLibraryAfterPermission = false
 
     private val chooseRestoreFolderLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -99,7 +100,17 @@ class MainActivity : ComponentActivity() {
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        musicViewModelRef?.loadLibrary(granted)
+        if (granted) {
+            if (pendingEnableSystemLibraryAfterPermission) {
+                pendingEnableSystemLibraryAfterPermission = false
+                musicViewModelRef?.enableSystemLibrary(true)
+            } else {
+                musicViewModelRef?.loadLibrary(true)
+            }
+        } else {
+            pendingEnableSystemLibraryAfterPermission = false
+            musicViewModelRef?.loadLibrary(false)
+        }
     }
 
     sealed class Screen {
@@ -180,6 +191,7 @@ class MainActivity : ComponentActivity() {
                                     isMoviesFavorite = isMoviesFavorite,
                                     isMusicFavorite = isMusicFavorite,
                                     onOpenBackupRestore = {
+                                        appListViewModel.loadApps()
                                         backupViewModel.loadBackupRecords()
                                         currentScreen = Screen.BackupRestoreHome
                                     },
@@ -187,7 +199,7 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = Screen.MovieWeb
                                     },
                                     onOpenMusic = {
-                                        musicViewModel.loadLibrary(hasAudioPermission())
+                                        musicViewModel.ensureLibraryLoaded(hasAudioPermission())
                                         currentScreen = Screen.Music
                                     },
                                     onSetBackupRestoreFavorite = ::updateBackupRestoreFavorite,
@@ -203,6 +215,7 @@ class MainActivity : ComponentActivity() {
                                     backupCount = backupRecords.size,
                                     isBaiduAuthorized = isAuthorized,
                                     onOpenBackupRestore = {
+                                        appListViewModel.loadApps()
                                         backupViewModel.loadBackupRecords()
                                         currentScreen = Screen.BackupRestoreHome
                                     },
@@ -210,7 +223,7 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = Screen.MovieWeb
                                     },
                                     onOpenMusic = {
-                                        musicViewModel.loadLibrary(hasAudioPermission())
+                                        musicViewModel.ensureLibraryLoaded(hasAudioPermission())
                                         currentScreen = Screen.Music
                                     },
                                     onSetBackupRestoreFavorite = ::updateBackupRestoreFavorite,
@@ -218,7 +231,7 @@ class MainActivity : ComponentActivity() {
                                     onSetMusicFavorite = ::updateMusicFavorite,
                                 )
                             },
-                            mineContent = { MineScreen() },
+                            mineContent = { MineScreen(onCheckUpdate = ::checkUpdateManually) },
                         )
                     }
 
@@ -309,7 +322,7 @@ class MainActivity : ComponentActivity() {
                             viewModel = musicViewModel,
                             onBack = { currentScreen = Screen.Main(MainTab.Tools) },
                             onRefresh = { musicViewModel.loadLibrary(hasAudioPermission()) },
-                            onRequestPermission = ::requestAudioPermission,
+                            onRequestPermission = ::enableSystemMusicDirectly,
                             onAddFolder = { chooseMusicFolderLauncher.launch(null) },
                         )
                     }
@@ -450,6 +463,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun checkUpdateManually() {
+        Toast.makeText(this, "正在检查更新...", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            updateService.checkForUpdate(ignoreSkipped = true)
+                .onSuccess { update ->
+                    if (update == null) {
+                        Toast.makeText(this@MainActivity, "已是最新版本", Toast.LENGTH_SHORT).show()
+                    } else {
+                        pendingUpdate = update
+                    }
+                }
+                .onFailure {
+                    Toast.makeText(this@MainActivity, "检查更新失败：${it.message}", Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
     private fun installApk(uri: Uri) {
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
@@ -481,13 +511,18 @@ class MainActivity : ComponentActivity() {
         return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun requestAudioPermission() {
+    private fun enableSystemMusicDirectly() {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_AUDIO
         } else {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
-        audioPermissionLauncher.launch(permission)
+        if (hasAudioPermission()) {
+            musicViewModelRef?.enableSystemLibrary(true)
+        } else {
+            pendingEnableSystemLibraryAfterPermission = true
+            audioPermissionLauncher.launch(permission)
+        }
     }
 
     private fun updateBackupRestoreFavorite(favorite: Boolean) {
