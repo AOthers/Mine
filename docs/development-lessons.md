@@ -72,6 +72,19 @@ androidx.compose.animation.core.KeyframesSpec$KeyframesSpecConfig
 - 不绕过网站限制、付费、版权或广告机制。
 - 错误状态只提供重试和浏览器打开。
 
+### 影视 WebView 全屏不能只靠 WebViewClient
+
+问题：网页播放器里的全屏按钮点击后没有反应。
+
+原因：网页请求全屏时会通过 `WebChromeClient.onShowCustomView` 交出一个 custom view；如果页面只设置 `WebViewClient`，这个请求没有接管者。
+
+以后避免：
+
+- 影视页必须保留 `WebChromeClient.onShowCustomView/onHideCustomView`。
+- 全屏时用黑底容器承载网页提供的 custom view，并隐藏系统栏。
+- 返回键应先退出网页全屏，再处理 WebView 历史，最后才退出影视页面。
+- `MainActivity` 需要保留 `android:configChanges="keyboardHidden|orientation|screenSize"`，否则横竖屏切换会重建 Activity，让影视页回到默认功能页。
+
 ## 备份与恢复
 
 ### 切换网盘备份目录后刷新不能留下旧数据
@@ -398,7 +411,7 @@ git ls-remote --tags origin v1.1
 - 备份上传路径和恢复读取路径是否一致。
 - 新手机场景下是否还能显示应用名、版本和图标。
 - SAF 路径是否按 content URI 处理。
-- WebView 页面是否处理加载失败和返回历史。
+- WebView 页面是否处理加载失败、返回历史、网页全屏 custom view 和横竖屏切换。
 - 检查更新是否有 GitHub Release 和 `.apk` asset。
 - `assembleDebug` 是否通过。
 - 涉及发布配置时，`assembleRelease` 是否通过。

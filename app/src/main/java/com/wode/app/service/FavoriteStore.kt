@@ -17,5 +17,6 @@ class FavoriteStore(context: Context) {
         const val TOOL_BACKUP_RESTORE = "backup_restore"
         const val TOOL_MOVIES = "movies"
         const val TOOL_MUSIC = "music"
+        const val TOOL_READER = "reader"
     }
 }

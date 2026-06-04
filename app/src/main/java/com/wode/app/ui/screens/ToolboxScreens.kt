@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Favorite
@@ -110,12 +111,15 @@ fun ToolboxHomeScreenContent(
     isBackupRestoreFavorite: Boolean,
     isMoviesFavorite: Boolean,
     isMusicFavorite: Boolean,
+    isReaderFavorite: Boolean,
     onOpenBackupRestore: () -> Unit,
     onOpenMovies: () -> Unit,
     onOpenMusic: () -> Unit,
+    onOpenReader: () -> Unit,
     onSetBackupRestoreFavorite: (Boolean) -> Unit,
     onSetMoviesFavorite: (Boolean) -> Unit,
     onSetMusicFavorite: (Boolean) -> Unit,
+    onSetReaderFavorite: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -155,6 +159,12 @@ fun ToolboxHomeScreenContent(
             onClick = onOpenMusic,
             onSetFavorite = onSetMusicFavorite,
         )
+        Spacer(Modifier.height(14.dp))
+        ReaderToolCard(
+            isFavorite = isReaderFavorite,
+            onClick = onOpenReader,
+            onSetFavorite = onSetReaderFavorite,
+        )
     }
 }
 
@@ -163,16 +173,19 @@ fun FavoritesScreen(
     isBackupRestoreFavorite: Boolean,
     isMoviesFavorite: Boolean,
     isMusicFavorite: Boolean,
+    isReaderFavorite: Boolean,
     backupCount: Int,
     isBaiduAuthorized: Boolean,
     onOpenBackupRestore: () -> Unit,
     onOpenMovies: () -> Unit,
     onOpenMusic: () -> Unit,
+    onOpenReader: () -> Unit,
     onSetBackupRestoreFavorite: (Boolean) -> Unit,
     onSetMoviesFavorite: (Boolean) -> Unit,
     onSetMusicFavorite: (Boolean) -> Unit,
+    onSetReaderFavorite: (Boolean) -> Unit,
 ) {
-    if (isBackupRestoreFavorite || isMoviesFavorite || isMusicFavorite) {
+    if (isBackupRestoreFavorite || isMoviesFavorite || isMusicFavorite || isReaderFavorite) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -211,6 +224,16 @@ fun FavoritesScreen(
                     isFavorite = true,
                     onClick = onOpenMusic,
                     onSetFavorite = onSetMusicFavorite,
+                )
+            }
+            if ((isBackupRestoreFavorite || isMoviesFavorite || isMusicFavorite) && isReaderFavorite) {
+                Spacer(Modifier.height(14.dp))
+            }
+            if (isReaderFavorite) {
+                ReaderToolCard(
+                    isFavorite = true,
+                    onClick = onOpenReader,
+                    onSetFavorite = onSetReaderFavorite,
                 )
             }
         }
@@ -354,6 +377,48 @@ private fun MusicToolCard(
             onDismissRequest = { showFavoriteDialog = false },
             title = { Text(if (isFavorite) "取消收藏" else "收藏功能") },
             text = { Text(if (isFavorite) "是否取消收藏“音乐”？" else "是否收藏“音乐”？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSetFavorite(!isFavorite)
+                        showFavoriteDialog = false
+                    },
+                ) {
+                    Text(if (isFavorite) "取消收藏" else "收藏")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFavoriteDialog = false }) {
+                    Text("关闭")
+                }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ReaderToolCard(
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onSetFavorite: (Boolean) -> Unit,
+) {
+    var showFavoriteDialog by remember { mutableStateOf(false) }
+
+    ToolCard(
+        title = "阅读器",
+        subtitle = "阅读本地小说、PDF 和漫画",
+        status = if (isFavorite) "已收藏" else "本地阅读",
+        icon = Icons.AutoMirrored.Filled.MenuBook,
+        onClick = onClick,
+        onLongClick = { showFavoriteDialog = true },
+    )
+
+    if (showFavoriteDialog) {
+        AlertDialog(
+            onDismissRequest = { showFavoriteDialog = false },
+            title = { Text(if (isFavorite) "取消收藏" else "收藏功能") },
+            text = { Text(if (isFavorite) "是否取消收藏“阅读器”？" else "是否收藏“阅读器”？") },
             confirmButton = {
                 TextButton(
                     onClick = {

@@ -29,6 +29,7 @@ import com.wode.app.data.BackupRecord
 import com.wode.app.data.UpdateInfo
 import com.wode.app.service.BaiduPanService
 import com.wode.app.service.FavoriteStore
+import com.wode.app.service.MovieSourceStore
 import com.wode.app.service.RestoreLinkStore
 import com.wode.app.service.TokenStore
 import com.wode.app.service.UpdateService
@@ -39,6 +40,7 @@ import com.wode.app.ui.screens.FavoritesScreen
 import com.wode.app.ui.screens.MineScreen
 import com.wode.app.ui.screens.MovieWebScreen
 import com.wode.app.ui.screens.MusicScreen
+import com.wode.app.ui.screens.ReaderScreen
 import com.wode.app.ui.screens.normalizeMovieUrl
 import com.wode.app.ui.screens.RestoreScreen
 import com.wode.app.ui.screens.SettingsScreen
@@ -49,6 +51,8 @@ import com.wode.app.viewmodel.AppListViewModel
 import com.wode.app.viewmodel.BackupViewModel
 import com.wode.app.viewmodel.InstallEvent
 import com.wode.app.viewmodel.MusicViewModel
+import com.wode.app.viewmodel.ReaderEvent
+import com.wode.app.viewmodel.ReaderViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -58,15 +62,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var restoreLinkStore: RestoreLinkStore
     private lateinit var favoriteStore: FavoriteStore
     private lateinit var updateService: UpdateService
+    private lateinit var movieSourceStore: MovieSourceStore
 
     private var currentScreen by mutableStateOf<Screen>(Screen.Main(MainTab.Tools))
     private var latestIntent by mutableStateOf<Intent?>(null)
     private var pendingAppKey: String? = null
     private var backupViewModelRef: BackupViewModel? = null
     private var musicViewModelRef: MusicViewModel? = null
+    private var readerViewModelRef: ReaderViewModel? = null
     private var isBackupRestoreFavorite by mutableStateOf(false)
     private var isMoviesFavorite by mutableStateOf(false)
     private var isMusicFavorite by mutableStateOf(false)
+    private var isReaderFavorite by mutableStateOf(false)
     private var pendingUpdate by mutableStateOf<UpdateInfo?>(null)
     private var isDownloadingUpdate by mutableStateOf(false)
     private var pendingEnableSystemLibraryAfterPermission = false
@@ -97,6 +104,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val chooseReaderFileLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            readerViewModelRef?.addFile(uri)
+        }
+    }
+
+    private val chooseReaderFolderLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            readerViewModelRef?.addFolder(uri)
+        }
+    }
+
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -122,6 +147,7 @@ class MainActivity : ComponentActivity() {
         object RestoreList : Screen()
         object MovieWeb : Screen()
         object Music : Screen()
+        object Reader : Screen()
     }
 
     enum class MainTab { Tools, Favorites, Mine }
@@ -135,9 +161,11 @@ class MainActivity : ComponentActivity() {
         restoreLinkStore = RestoreLinkStore(this)
         favoriteStore = FavoriteStore(this)
         updateService = UpdateService(this)
+        movieSourceStore = MovieSourceStore(this)
         isBackupRestoreFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_BACKUP_RESTORE)
         isMoviesFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_MOVIES)
         isMusicFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_MUSIC)
+        isReaderFavorite = favoriteStore.isFavorite(FavoriteStore.TOOL_READER)
         latestIntent = intent
         requestNotificationPermissionIfNeeded()
 
@@ -146,8 +174,10 @@ class MainActivity : ComponentActivity() {
                 val appListViewModel: AppListViewModel = viewModel()
                 val backupViewModel: BackupViewModel = viewModel()
                 val musicViewModel: MusicViewModel = viewModel()
+                val readerViewModel: ReaderViewModel = viewModel()
                 backupViewModelRef = backupViewModel
                 musicViewModelRef = musicViewModel
+                readerViewModelRef = readerViewModel
 
                 val isAuthorized by backupViewModel.isAuthorized.collectAsState()
                 val backupRecords by backupViewModel.backupRecords.collectAsState()
@@ -178,6 +208,15 @@ class MainActivity : ComponentActivity() {
                         .onSuccess { update -> pendingUpdate = update }
                 }
 
+                LaunchedEffect(Unit) {
+                    readerViewModel.events.collect { event ->
+                        when (event) {
+                            is ReaderEvent.Toast ->
+                                Toast.makeText(this@MainActivity, event.message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+
                 when (val screen = currentScreen) {
                     is Screen.Main -> {
                         ToolboxHomeScreen(
@@ -190,6 +229,7 @@ class MainActivity : ComponentActivity() {
                                     isBackupRestoreFavorite = isBackupRestoreFavorite,
                                     isMoviesFavorite = isMoviesFavorite,
                                     isMusicFavorite = isMusicFavorite,
+                                    isReaderFavorite = isReaderFavorite,
                                     onOpenBackupRestore = {
                                         appListViewModel.loadApps()
                                         backupViewModel.loadBackupRecords()
@@ -202,9 +242,13 @@ class MainActivity : ComponentActivity() {
                                         musicViewModel.ensureLibraryLoaded(hasAudioPermission())
                                         currentScreen = Screen.Music
                                     },
+                                    onOpenReader = {
+                                        currentScreen = Screen.Reader
+                                    },
                                     onSetBackupRestoreFavorite = ::updateBackupRestoreFavorite,
                                     onSetMoviesFavorite = ::updateMoviesFavorite,
                                     onSetMusicFavorite = ::updateMusicFavorite,
+                                    onSetReaderFavorite = ::updateReaderFavorite,
                                 )
                             },
                             favoritesContent = {
@@ -212,6 +256,7 @@ class MainActivity : ComponentActivity() {
                                     isBackupRestoreFavorite = isBackupRestoreFavorite,
                                     isMoviesFavorite = isMoviesFavorite,
                                     isMusicFavorite = isMusicFavorite,
+                                    isReaderFavorite = isReaderFavorite,
                                     backupCount = backupRecords.size,
                                     isBaiduAuthorized = isAuthorized,
                                     onOpenBackupRestore = {
@@ -226,9 +271,13 @@ class MainActivity : ComponentActivity() {
                                         musicViewModel.ensureLibraryLoaded(hasAudioPermission())
                                         currentScreen = Screen.Music
                                     },
+                                    onOpenReader = {
+                                        currentScreen = Screen.Reader
+                                    },
                                     onSetBackupRestoreFavorite = ::updateBackupRestoreFavorite,
                                     onSetMoviesFavorite = ::updateMoviesFavorite,
                                     onSetMusicFavorite = ::updateMusicFavorite,
+                                    onSetReaderFavorite = ::updateReaderFavorite,
                                 )
                             },
                             mineContent = { MineScreen(onCheckUpdate = ::checkUpdateManually) },
@@ -254,6 +303,7 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             viewModel = backupViewModel,
                             tokenStore = tokenStore,
+                            movieSourceStore = movieSourceStore,
                             onBack = { currentScreen = Screen.BackupRestoreHome },
                             onStartOAuth = { appKey ->
                                 pendingAppKey = appKey
@@ -312,6 +362,7 @@ class MainActivity : ComponentActivity() {
 
                     Screen.MovieWeb -> {
                         MovieWebScreen(
+                            movieSourceStore = movieSourceStore,
                             onBack = { currentScreen = Screen.Main(MainTab.Tools) },
                             onOpenExternal = ::openMovieLink,
                         )
@@ -324,6 +375,15 @@ class MainActivity : ComponentActivity() {
                             onRefresh = { musicViewModel.loadLibrary(hasAudioPermission()) },
                             onRequestPermission = ::enableSystemMusicDirectly,
                             onAddFolder = { chooseMusicFolderLauncher.launch(null) },
+                        )
+                    }
+
+                    Screen.Reader -> {
+                        ReaderScreen(
+                            viewModel = readerViewModel,
+                            onBack = { currentScreen = Screen.Main(MainTab.Tools) },
+                            onAddFile = { chooseReaderFileLauncher.launch(arrayOf("*/*")) },
+                            onAddFolder = { chooseReaderFolderLauncher.launch(null) },
                         )
                     }
                 }
@@ -364,6 +424,7 @@ class MainActivity : ComponentActivity() {
             Screen.RestoreList -> currentScreen = Screen.BackupRestoreHome
             Screen.MovieWeb -> currentScreen = Screen.Main(MainTab.Tools)
             Screen.Music -> currentScreen = Screen.Main(MainTab.Tools)
+            Screen.Reader -> currentScreen = Screen.Main(MainTab.Tools)
             Screen.BackupProgress -> {
                 appListViewModel.loadApps()
                 backupViewModel.loadBackupRecords()
@@ -540,6 +601,12 @@ class MainActivity : ComponentActivity() {
     private fun updateMusicFavorite(favorite: Boolean) {
         favoriteStore.setFavorite(FavoriteStore.TOOL_MUSIC, favorite)
         isMusicFavorite = favorite
+        Toast.makeText(this, if (favorite) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateReaderFavorite(favorite: Boolean) {
+        favoriteStore.setFavorite(FavoriteStore.TOOL_READER, favorite)
+        isReaderFavorite = favorite
         Toast.makeText(this, if (favorite) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
     }
 

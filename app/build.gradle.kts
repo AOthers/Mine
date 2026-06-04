@@ -21,8 +21,8 @@ android {
         applicationId = "com.wode.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
 
         // 百度网盘 AppKey — 用户在设置页填入，这里给个占位
         buildConfigField("String", "BAIDU_PAN_APP_KEY", "\"\"")

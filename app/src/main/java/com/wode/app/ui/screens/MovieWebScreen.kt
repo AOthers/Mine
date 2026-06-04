@@ -1,16 +1,21 @@
 package com.wode.app.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.graphics.Bitmap
 import android.net.Uri
+import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,21 +25,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,10 +56,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-
-private const val MOVIE_HOME_URL = "https://www.hhkan0.com/"
+import com.wode.app.data.MovieSource
+import com.wode.app.service.MovieSourceStore
 
 class MovieWebNavigationState(
     private val canGoBack: Boolean,
@@ -67,16 +82,24 @@ private class MovieWebViewHolder {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MovieWebScreen(
+    movieSourceStore: MovieSourceStore,
     onBack: () -> Unit,
     onOpenExternal: (String) -> Unit,
 ) {
     val webViewHolder = remember { MovieWebViewHolder() }
+    val context = LocalContext.current
+    val activity = context as? Activity
     val currentOpenExternal by rememberUpdatedState(onOpenExternal)
-    var currentUrl by remember { mutableStateOf(MOVIE_HOME_URL) }
+    val movieSources by movieSourceStore.sources.collectAsState()
+    val currentSource by movieSourceStore.currentSource.collectAsState()
+    var currentUrl by remember { mutableStateOf(currentSource.url) }
     var isLoading by remember { mutableStateOf(true) }
     var progress by remember { mutableFloatStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+    var showSourceDialog by remember { mutableStateOf(false) }
+    var fullScreenView by remember { mutableStateOf<View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
     val navigationState = remember(canGoBack, webViewHolder) {
         MovieWebNavigationState(
@@ -86,17 +109,46 @@ fun MovieWebScreen(
     }
 
     BackHandler {
-        if (!navigationState.consumeBack()) {
+        if (fullScreenView != null) {
+            customViewCallback?.onCustomViewHidden()
+        } else if (!navigationState.consumeBack()) {
             onBack()
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            customViewCallback?.onCustomViewHidden()
             webViewHolder.webView?.stopLoading()
             webViewHolder.webView?.destroy()
             webViewHolder.webView = null
         }
+    }
+
+    DisposableEffect(fullScreenView) {
+        val window = activity?.window
+        if (fullScreenView != null) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window?.decorView?.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window?.decorView?.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+        }
+        onDispose {
+            if (fullScreenView != null) {
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                window?.decorView?.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+            }
+        }
+    }
+
+    LaunchedEffect(currentSource.url) {
+        errorMessage = null
+        currentUrl = currentSource.url
+        webViewHolder.webView?.loadUrl(currentSource.url)
     }
 
     Scaffold(
@@ -112,10 +164,14 @@ fun MovieWebScreen(
                     IconButton(
                         onClick = {
                             errorMessage = null
-                            webViewHolder.webView?.loadUrl(MOVIE_HOME_URL)
+                            currentUrl = currentSource.url
+                            webViewHolder.webView?.loadUrl(currentSource.url)
                         },
                     ) {
                         Icon(Icons.Default.Home, contentDescription = "主页")
+                    }
+                    IconButton(onClick = { showSourceDialog = true }) {
+                        Icon(Icons.Default.Link, contentDescription = "来源")
                     }
                     IconButton(
                         onClick = {
@@ -154,12 +210,28 @@ fun MovieWebScreen(
                         settings.domStorageEnabled = true
                         settings.loadsImagesAutomatically = true
                         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                if (view == null) return
+                                if (fullScreenView != null) {
+                                    callback?.onCustomViewHidden()
+                                    return
+                                }
+                                fullScreenView = view
+                                customViewCallback = callback
+                            }
+
+                            override fun onHideCustomView() {
+                                fullScreenView = null
+                                customViewCallback = null
+                            }
+                        }
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                                 isLoading = true
                                 progress = 0.25f
                                 errorMessage = null
-                                currentUrl = url ?: MOVIE_HOME_URL
+                                currentUrl = url ?: currentSource.url
                                 canGoBack = view.canGoBack()
                             }
 
@@ -195,7 +267,7 @@ fun MovieWebScreen(
                                 }
                             }
                         }
-                        loadUrl(MOVIE_HOME_URL)
+                        loadUrl(currentSource.url)
                     }
                 },
                 update = { view ->
@@ -225,7 +297,30 @@ fun MovieWebScreen(
                 )
             }
 
+            fullScreenView?.let { view ->
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(androidx.compose.ui.graphics.Color.Black),
+                    factory = {
+                        (view.parent as? ViewGroup)?.removeView(view)
+                        view
+                    },
+                )
+            }
         }
+    }
+
+    if (showSourceDialog) {
+        MovieSourceDialog(
+            sources = movieSources,
+            currentSource = currentSource,
+            onSelectSource = movieSourceStore::selectSource,
+            onAddSource = { name, url -> movieSourceStore.addSource(name, url) },
+            onDeleteSource = movieSourceStore::deleteSource,
+            onRestoreDefaults = movieSourceStore::restoreDefaults,
+            onDismiss = { showSourceDialog = false },
+        )
     }
 }
 
@@ -258,6 +353,92 @@ private fun MovieWebError(
     }
 }
 
+@Composable
+private fun MovieSourceDialog(
+    sources: List<MovieSource>,
+    currentSource: MovieSource,
+    onSelectSource: (String) -> Unit,
+    onAddSource: (String, String) -> Unit,
+    onDeleteSource: (String) -> Unit,
+    onRestoreDefaults: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var sourceName by remember { mutableStateOf("") }
+    var sourceUrl by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("影视来源") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                sources.forEach { source ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectSource(source.id) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = source.id == currentSource.id,
+                            onClick = { onSelectSource(source.id) },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(source.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = source.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (source.id != MovieSourceStore.DEFAULT_SOURCE_ID) {
+                            IconButton(onClick = { onDeleteSource(source.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "删除")
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = sourceName,
+                    onValueChange = { sourceName = it },
+                    label = { Text("名称") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = sourceUrl,
+                    onValueChange = { sourceUrl = it },
+                    label = { Text("网址") },
+                    placeholder = { Text(MovieSourceStore.DEFAULT_SOURCE_URL) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onAddSource(sourceName, sourceUrl)
+                    sourceName = ""
+                    sourceUrl = ""
+                },
+                enabled = sourceUrl.isNotBlank(),
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onRestoreDefaults) {
+                Text("恢复默认")
+            }
+            TextButton(onClick = onDismiss) {
+                Text("完成")
+            }
+        },
+    )
+}
+
 fun normalizeMovieUrl(url: String): Uri {
-    return Uri.parse(url.ifBlank { MOVIE_HOME_URL })
+    return Uri.parse(MovieSourceStore.normalizeUrl(url))
 }
