@@ -225,6 +225,25 @@ androidx.compose.animation.core.KeyframesSpec$KeyframesSpecConfig
 
 ## 通知与安装
 
+### 启动图标和通知小图标不要共用同一个资源
+
+问题：调整启动图标时曾经删除 `ic_launcher_foreground`，导致 `ProgressNotifier` 里引用 `R.drawable.ic_launcher_foreground` 的通知构建代码无法编译。
+原因：launcher adaptive icon 前景和通知栏 small icon 是两种不同用途。启动图标可以是彩色 PNG；通知栏 small icon 应该是单色矢量 drawable，并且会被系统按通知样式着色。
+以后避免：
+- launcher 图标使用 `mipmap-*dpi/ic_launcher.png`、`mipmap-anydpi-v26/ic_launcher.xml`、`drawable/ic_launcher_background.xml` 和 `drawable-xxxhdpi/ic_launcher_foreground.png`。
+- 通知栏 small icon 使用独立资源，例如 `R.drawable.ic_notification_progress`。
+- 不要为了替换 launcher 图标而删除通知代码仍在引用的 drawable；如果资源名要让给 launcher，先把通知代码迁移到独立图标资源。
+
+### 透明 launcher 图标在手机桌面上不可靠
+
+问题：透明 PNG 图标在部分手机桌面上会被显示成白底或黑底，即使 APK 内 PNG 角落 alpha 为 0。
+原因：Android adaptive icon 由 background 和 foreground 两层组成，启动器会套蒙版并可能补默认底色；删除 adaptive XML 走 legacy PNG 后，部分 launcher 或主题仍可能给透明图标自动垫底。
+以后避免：
+- 如果希望不同手机桌面表现稳定，优先使用白底 adaptive icon，而不是追求真正透明底。
+- `mipmap-anydpi-v26/ic_launcher.xml` 和 `ic_launcher_round.xml` 保留白色 `@drawable/ic_launcher_background`，前景使用带安全留白的 `@drawable/ic_launcher_foreground`。
+- 更换人物或品牌图时，先从源图生成各密度 `mipmap-*dpi/ic_launcher.png`，再生成 adaptive 前景 PNG；不要只替换一个密度。
+- 修改后用 `jar tf app/build/outputs/apk/debug/app-debug.apk | Select-String ic_launcher` 检查 APK 内实际打包的图标资源，避免被旧 adaptive 或旧 PNG 缓存误导。
+
 ### 备份和恢复都要有通知栏进度
 
 问题：长时间上传或下载时，用户无法判断任务是否还在进行。

@@ -80,6 +80,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -822,7 +823,13 @@ private fun ReaderTopBar(
     extraActions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
-        title = { Text(title) },
+        title = {
+            Text(
+                title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
         navigationIcon = {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = iconColor)
@@ -849,9 +856,7 @@ private fun ReaderBlock(block: ReaderContentBlock, settings: ReaderSettings, tex
     when (block) {
         is ReaderContentBlock.Text -> Text(
             text = if (settings.firstLineIndent) {
-                block.text.lines().joinToString("\n") { line ->
-                    if (line.isBlank()) line else "\u3000\u3000$line"
-                }
+                block.text.lines().joinToString("\n") { line -> line.withFirstLineIndentIfNeeded() }
             } else {
                 block.text
             },
@@ -867,6 +872,15 @@ private fun ReaderBlock(block: ReaderContentBlock, settings: ReaderSettings, tex
             contentScale = ContentScale.FillWidth,
         )
     }
+}
+
+private fun String.withFirstLineIndentIfNeeded(): String {
+    if (isBlank()) return this
+    return if (firstOrNull()?.isIndentChar() == true) this else "\u3000\u3000$this"
+}
+
+private fun Char.isIndentChar(): Boolean {
+    return this == ' ' || this == '\t' || this == '\u3000'
 }
 
 @Composable

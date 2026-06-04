@@ -5,7 +5,7 @@ import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -86,6 +89,11 @@ fun MusicScreen(
     var showFolders by remember { mutableStateOf(false) }
     var showSortDialog by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
+    var actionTrack by remember { mutableStateOf<MusicTrack?>(null) }
+    var renamingTrack by remember { mutableStateOf<MusicTrack?>(null) }
+    var deletingTrack by remember { mutableStateOf<MusicTrack?>(null) }
+    val listState = rememberLazyListState()
+    var hasPositionedOnOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(viewModel) {
         viewModel.messages.collect { message ->
@@ -93,10 +101,27 @@ fun MusicScreen(
         }
     }
 
+    LaunchedEffect(state.tracks.map { it.id }) {
+        if (hasPositionedOnOpen || state.tracks.isEmpty()) return@LaunchedEffect
+        hasPositionedOnOpen = true
+        val currentTrackId = state.currentTrack?.id ?: return@LaunchedEffect
+        val currentIndex = state.tracks.indexOfFirst { it.id == currentTrackId }
+        if (currentIndex >= 0) {
+            listState.animateScrollToItem((currentIndex - 2).coerceAtLeast(0))
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("\u97f3\u4e50") },
+                title = {
+                    Text(
+                        "\u97f3\u4e50\u64ad\u653e\u5668",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "\u8fd4\u56de")
@@ -141,10 +166,15 @@ fun MusicScreen(
                 )
             }
             if (state.tracks.isEmpty() && !state.isLoading) {
-                EmptyMusicState(onAddFolder = onAddFolder, onRequestPermission = onRequestPermission)
+                EmptyMusicState(
+                    modifier = Modifier.weight(1f),
+                    onAddFolder = onAddFolder,
+                    onRequestPermission = onRequestPermission,
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.tracks, key = { it.id }) { track ->
@@ -152,6 +182,7 @@ fun MusicScreen(
                             track = track,
                             isPlaying = state.currentTrack?.id == track.id,
                             onClick = { viewModel.playTrack(track) },
+                            onLongClick = { actionTrack = track },
                         )
                     }
                 }
@@ -210,6 +241,47 @@ fun MusicScreen(
                 onAddFolder()
             },
             onClose = { showSources = false },
+        )
+    }
+
+    actionTrack?.let { track ->
+        TrackActionDialog(
+            track = track,
+            onDismiss = { actionTrack = null },
+            onRename = {
+                renamingTrack = track
+                actionTrack = null
+            },
+            onDelete = {
+                deletingTrack = track
+                actionTrack = null
+            },
+        )
+    }
+
+    renamingTrack?.let { track ->
+        RenameTrackDialog(
+            track = track,
+            onDismiss = { renamingTrack = null },
+            onSave = { title, artist ->
+                viewModel.renameTrack(track, title, artist)
+                renamingTrack = null
+            },
+        )
+    }
+
+    deletingTrack?.let { track ->
+        DeleteTrackDialog(
+            track = track,
+            onDismiss = { deletingTrack = null },
+            onRemoveFromApp = {
+                viewModel.removeTrackFromApp(track)
+                deletingTrack = null
+            },
+            onDeleteFile = {
+                viewModel.deleteTrackFile(track)
+                deletingTrack = null
+            },
         )
     }
 }
@@ -312,8 +384,12 @@ private val PlayMode.icon: ImageVector
     }
 
 @Composable
-private fun EmptyMusicState(onAddFolder: () -> Unit, onRequestPermission: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+private fun EmptyMusicState(
+    modifier: Modifier = Modifier,
+    onAddFolder: () -> Unit,
+    onRequestPermission: () -> Unit,
+) {
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Text("\u8fd8\u6ca1\u6709\u8bc6\u522b\u5230\u97f3\u4e50", style = MaterialTheme.typography.titleMedium)
@@ -325,12 +401,21 @@ private fun EmptyMusicState(onAddFolder: () -> Unit, onRequestPermission: () -> 
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TrackRow(track: MusicTrack, isPlaying: Boolean, onClick: () -> Unit) {
+private fun TrackRow(
+    track: MusicTrack,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isPlaying) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
@@ -348,6 +433,131 @@ private fun TrackRow(track: MusicTrack, isPlaying: Boolean, onClick: () -> Unit)
             )
         }
     }
+}
+
+@Composable
+private fun TrackActionDialog(
+    track: MusicTrack,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("\u6b4c\u66f2\u64cd\u4f5c") },
+        text = {
+            Text(
+                track.title,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onRename) {
+                Text("\u91cd\u547d\u540d")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDelete) {
+                    Text("\u5220\u9664")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("\u53d6\u6d88")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun RenameTrackDialog(
+    track: MusicTrack,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var title by remember(track.id) { mutableStateOf(track.title) }
+    var artist by remember(track.id) { mutableStateOf(track.artist) }
+    val canSave = title.trim().isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("\u91cd\u547d\u540d\u6b4c\u66f2") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("\u6b4c\u66f2\u540d\u79f0") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = artist,
+                    onValueChange = { artist = it },
+                    label = { Text("\u6b4c\u624b\u540d\u79f0") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(title, artist) },
+                enabled = canSave,
+            ) {
+                Text("\u4fdd\u5b58")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("\u53d6\u6d88")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteTrackDialog(
+    track: MusicTrack,
+    onDismiss: () -> Unit,
+    onRemoveFromApp: () -> Unit,
+    onDeleteFile: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("\u5220\u9664\u6b4c\u66f2") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    track.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "\u4ec5\u4ece\u672c\u8f6f\u4ef6\u79fb\u9664\u4e0d\u4f1a\u5220\u9664\u624b\u673a\u91cc\u7684\u97f3\u4e50\u6587\u4ef6\uff1b\u5220\u9664\u539f\u6587\u4ef6\u4f1a\u5c1d\u8bd5\u76f4\u63a5\u5220\u9664\u624b\u673a\u91cc\u7684\u8fd9\u9996\u6b4c\u3002",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRemoveFromApp) {
+                Text("\u4ec5\u4ece\u672c\u8f6f\u4ef6\u79fb\u9664")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDeleteFile) {
+                    Text("\u5220\u9664\u539f\u6587\u4ef6", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("\u53d6\u6d88")
+                }
+            }
+        },
+    )
 }
 
 @Composable

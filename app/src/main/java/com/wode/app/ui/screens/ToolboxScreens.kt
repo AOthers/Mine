@@ -106,7 +106,6 @@ fun ToolboxHomeScreen(
 
 @Composable
 fun ToolboxHomeScreenContent(
-    isBaiduAuthorized: Boolean,
     backupCount: Int,
     isBackupRestoreFavorite: Boolean,
     isMoviesFavorite: Boolean,
@@ -142,7 +141,6 @@ fun ToolboxHomeScreenContent(
 
         BackupRestoreToolCard(
             backupCount = backupCount,
-            isAuthorized = isBaiduAuthorized,
             isFavorite = isBackupRestoreFavorite,
             onClick = onOpenBackupRestore,
             onSetFavorite = onSetBackupRestoreFavorite,
@@ -175,7 +173,6 @@ fun FavoritesScreen(
     isMusicFavorite: Boolean,
     isReaderFavorite: Boolean,
     backupCount: Int,
-    isBaiduAuthorized: Boolean,
     onOpenBackupRestore: () -> Unit,
     onOpenMovies: () -> Unit,
     onOpenMusic: () -> Unit,
@@ -200,7 +197,6 @@ fun FavoritesScreen(
             if (isBackupRestoreFavorite) {
                 BackupRestoreToolCard(
                     backupCount = backupCount,
-                    isAuthorized = isBaiduAuthorized,
                     isFavorite = true,
                     onClick = onOpenBackupRestore,
                     onSetFavorite = onSetBackupRestoreFavorite,
@@ -324,7 +320,6 @@ private fun MoviesToolCard(
     ToolCard(
         title = "影视",
         subtitle = "内嵌影视站点浏览",
-        status = if (isFavorite) "已收藏" else "WebView",
         icon = Icons.Default.Movie,
         onClick = onClick,
         onLongClick = { showFavoriteDialog = true },
@@ -364,9 +359,8 @@ private fun MusicToolCard(
     var showFavoriteDialog by remember { mutableStateOf(false) }
 
     ToolCard(
-        title = "音乐",
+        title = "音乐播放器",
         subtitle = "识别本地音乐，播放并显示歌词",
-        status = if (isFavorite) "已收藏" else "本地音乐",
         icon = Icons.Default.MusicNote,
         onClick = onClick,
         onLongClick = { showFavoriteDialog = true },
@@ -376,7 +370,7 @@ private fun MusicToolCard(
         AlertDialog(
             onDismissRequest = { showFavoriteDialog = false },
             title = { Text(if (isFavorite) "取消收藏" else "收藏功能") },
-            text = { Text(if (isFavorite) "是否取消收藏“音乐”？" else "是否收藏“音乐”？") },
+            text = { Text(if (isFavorite) "是否取消收藏“音乐播放器”？" else "是否收藏“音乐播放器”？") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -408,7 +402,6 @@ private fun ReaderToolCard(
     ToolCard(
         title = "阅读器",
         subtitle = "阅读本地小说、PDF 和漫画",
-        status = if (isFavorite) "已收藏" else "本地阅读",
         icon = Icons.AutoMirrored.Filled.MenuBook,
         onClick = onClick,
         onLongClick = { showFavoriteDialog = true },
@@ -442,7 +435,6 @@ private fun ReaderToolCard(
 @Composable
 private fun BackupRestoreToolCard(
     backupCount: Int,
-    isAuthorized: Boolean,
     isFavorite: Boolean,
     onClick: () -> Unit,
     onSetFavorite: (Boolean) -> Unit,
@@ -452,7 +444,6 @@ private fun BackupRestoreToolCard(
     ToolCard(
         title = "备份与恢复",
         subtitle = if (backupCount > 0) "已备份 $backupCount 个安装包" else "提取安装包，保存到百度网盘",
-        status = if (isFavorite) "已收藏" else if (isAuthorized) "网盘已授权" else "需要配置网盘",
         icon = Icons.Default.SettingsBackupRestore,
         onClick = onClick,
         onLongClick = { showFavoriteDialog = true },
@@ -541,7 +532,6 @@ fun BackupRestoreHomeScreen(
 private fun ToolCard(
     title: String,
     subtitle: String,
-    status: String,
     icon: ImageVector,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
@@ -572,7 +562,6 @@ private fun ToolCard(
                 Text(title, style = MaterialTheme.typography.titleMedium)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

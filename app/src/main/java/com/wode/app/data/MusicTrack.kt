@@ -13,6 +13,8 @@ data class MusicTrack(
     val source: MusicSource,
     val folderName: String? = null,
     val folderRootUri: String? = null,
+    val parentUri: Uri? = null,
+    val fileName: String? = null,
     val lyricUri: Uri? = null,
 ) {
     val displayArtist: String

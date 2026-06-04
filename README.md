@@ -8,7 +8,7 @@
 - Long-press tool cards to favorite or unfavorite them.
 - Backup/restore tool for exporting installed APKs, backing them up to Baidu Pan, downloading backups, and installing restored APKs.
 - Movie tool that opens a configurable site source in a WebView for user-initiated browsing. The default source is `https://www.hhkan0.com/`.
-- Music player that scans system music or selected folders, supports local/online lyrics, and offers repeat/shuffle modes.
+- Music player that scans system music or selected folders, supports local/online lyrics, Android media controls, track rename/delete actions, and repeat/shuffle modes.
 - Reader for local novels, PDFs, EPUBs, image folders, ZIP comics, and CBZ comics.
 - Startup and manual update checks against [AOthers/Mine GitHub releases](https://github.com/AOthers/Mine/releases).
 
@@ -64,7 +64,9 @@ The music tool supports:
 - Fast folder rescans by caching recognized tracks and only rescanning when needed.
 - Sorting by name or modified time, in ascending or descending order.
 - Playback modes: repeat one, repeat list, and shuffle.
-- Lyric lookup from nearby `.lrc` files, embedded audio metadata, and online LRCLIB search.
+- Android system media controls through Media3 `MediaSession`.
+- Lyric lookup from nearby `.lrc` files, embedded audio metadata, LRCLIB search, and OIAPI QQ Music fallback search.
+- Filename and metadata cleanup for common song/artist patterns, including reversed title/artist tags.
 - A fixed-height lyric strip with marquee scrolling for long current lines.
 
 Online lyrics are looked up on demand and are not cached by default.

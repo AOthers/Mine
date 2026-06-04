@@ -31,7 +31,7 @@ class ProgressNotifier(private val context: Context) {
     fun showProgress(id: Int, title: String, text: String, progress: Int, indeterminate: Boolean = false) {
         if (!canPostNotifications()) return
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification_progress)
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(true)
@@ -44,7 +44,7 @@ class ProgressNotifier(private val context: Context) {
     fun showComplete(id: Int, title: String, text: String) {
         if (!canPostNotifications()) return
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification_progress)
             .setContentTitle(title)
             .setContentText(text)
             .setOngoing(false)

@@ -38,7 +38,7 @@ Before starting any non-trivial feature, bug fix, release, WebView, SAF/storage,
 - `RestoreScreen.kt` owns remote restore search/listing, version selection, manual link dialog, and downloaded APK management.
 - `SettingsScreen.kt` owns Baidu Pan credentials, authorization, remote backup path, restore folder picker, and same-version strategy.
 - `BackupViewModel.kt` owns backup/restore workflows, remote backup records, local restored APK records, delete behavior, notification progress, and restore target resolution.
-- `MusicViewModel.kt` owns music scan state, playback state, lyric lookup, sort mode, source management, and folder cache refresh decisions.
+- `MusicViewModel.kt` owns music scan state, playback state, Media3 session integration, lyric lookup, sort mode, source management, and folder cache refresh decisions.
 - `ReaderViewModel.kt` owns reader imports, library state, selected item loading, progress updates, PDF paging, and reading settings.
 - `BaiduPanService.kt` owns Baidu Pan OAuth, upload, list, filemetas, and download calls.
 - `UpdateService.kt` checks GitHub releases for app updates and downloads release APK assets.
@@ -49,7 +49,7 @@ Before starting any non-trivial feature, bug fix, release, WebView, SAF/storage,
 - `TextReaderService.kt`, `EpubReaderService.kt`, `PdfReaderService.kt`, and `ComicReaderService.kt` load local reader content.
 - `MovieSourceStore.kt` stores movie site sources, the current source, and the default source `https://www.hhkan0.com/`.
 - `MusicStore.kt` stores selected music sources, system-source state, sort mode, and folder scan cache.
-- `OnlineLyricsService.kt` searches LRCLIB for synced or plain lyrics. Online lyrics are not cached by default.
+- `OnlineLyricsService.kt` searches LRCLIB first, then OIAPI QQ Music as a fallback for synced or plain lyrics. Online lyrics are not cached by default.
 - `TokenStore.kt` stores tokens, credentials, remote backup path, restore folder URI/path, and same-version strategy.
 - `FavoriteStore.kt` stores local tool favorites.
 - `RestoreLinkStore.kt` stores manual restore links by package.
@@ -74,7 +74,9 @@ Before starting any non-trivial feature, bug fix, release, WebView, SAF/storage,
 - Music source management uses bottom-sheet style dialogs in `MusicScreen`; `MainActivity` only owns runtime permissions and SAF folder picker contracts.
 - Music list sorting is persisted in `MusicStore`. Reopening the music screen in the same process should reuse the existing library; app restart or explicit refresh/source changes may rescan.
 - Music folder scans should reuse cached tracks where possible. Remove stale folder cache entries when a folder source is removed.
-- Lyric lookup order is nearby `.lrc`, embedded audio metadata, then LRCLIB online search. Skip blank, `null`, or bracket-only lyric lines so the strip does not flicker back to "no lyrics".
+- Music playback should keep Media3 `MediaSession` attached to the app's ExoPlayer and set `MediaMetadata` for each queue item so Android system media controls can show playback state and track info.
+- Music title/artist cleanup should prefer known artists over string length guesses, correct obvious reversed MediaStore title/artist tags, and bump the folder track cache version when parser output changes.
+- Lyric lookup order is nearby `.lrc`, embedded audio metadata, LRCLIB online search, then OIAPI QQ Music fallback search. Skip blank, `null`, or bracket-only lyric lines so the strip does not flicker back to "no lyrics".
 - The music lyric strip has a fixed height. Long current lines should use marquee scrolling instead of resizing the header area.
 - Reader v1 is local-only. Do not add online novel/comic sources, scraping, OCR, cloud sync, or protected-content bypassing without a new product decision.
 - Reader v1 supports `.txt`, `.epub`, `.pdf`, image folders, `.zip`, and `.cbz`; images inside comic folders/archives support `.jpg`, `.jpeg`, `.png`, `.webp`, and `.gif`.

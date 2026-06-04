@@ -1,17 +1,22 @@
 package com.wode.app.viewmodel
 
 import android.app.Application
+import android.app.PendingIntent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Player.REPEAT_MODE_ALL
 import androidx.media3.common.Player.REPEAT_MODE_ONE
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import com.wode.app.data.Lyrics
 import com.wode.app.data.MusicTrack
+import com.wode.app.service.FileDeleteResult
 import com.wode.app.service.LyricParser
+import com.wode.app.service.MusicForegroundService
 import com.wode.app.service.MusicLibraryService
 import com.wode.app.service.MusicStore
 import com.wode.app.service.OnlineLyricsService
@@ -72,6 +77,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val libraryService = MusicLibraryService(application)
     private val onlineLyricsService = OnlineLyricsService()
     private val player = ExoPlayer.Builder(application).build()
+    private val mediaSession = MediaSession.Builder(application, player)
+        .setSessionActivity(createSessionActivity(application))
+        .build()
 
     private val _uiState = MutableStateFlow(MusicUiState(sortMode = store.getSortMode()))
     val uiState: StateFlow<MusicUiState> = _uiState.asStateFlow()
@@ -81,7 +89,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lyrics: Lyrics = Lyrics.Empty
     private var progressJob: Job? = null
+    private var lyricsJob: Job? = null
     private var hasLoadedLibraryThisRun = false
+    private var isForegroundServiceRunning = false
 
     init {
         applyPlayMode(PlayMode.LIST_LOOP)
@@ -90,6 +100,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
                     if (isPlaying) startProgressUpdates() else stopProgressUpdates()
+                    updateForegroundService(isPlaying)
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -114,7 +125,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             )
             val folders = store.getFolderUris().map { FolderSource(it, folderNameFromUri(it)) }
             val cachedTracks = withContext(Dispatchers.IO) {
-                store.getCachedFolderTracks(folders.map { it.uri })
+                store.applyTrackRenames(store.getCachedFolderTracks(folders.map { it.uri }))
             }
             if (cachedTracks.isNotEmpty()) {
                 _uiState.value = _uiState.value.copy(
@@ -133,7 +144,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 store.saveCachedFolderTracks(tracks)
             }
-            val sortedTracks = sortTracks(tracks, _uiState.value.sortMode)
+            val sortedTracks = sortTracks(store.applyTrackRenames(tracks), _uiState.value.sortMode)
             _uiState.value = _uiState.value.copy(
                 tracks = sortedTracks,
                 folders = folders,
@@ -164,6 +175,87 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         refreshPlayerQueueForSortedTracks(sortedTracks, state.currentTrack)
     }
 
+    fun renameTrack(track: MusicTrack, title: String, artist: String) {
+        renameTrackDisplayName(track, title, artist, message = "\u5df2\u5728\u672c\u8f6f\u4ef6\u4e2d\u4fdd\u5b58")
+    }
+
+    fun removeTrackFromApp(track: MusicTrack) {
+        store.hideTrack(track)
+        removeTrackFromState(track, message = "\u5df2\u4ece\u672c\u8f6f\u4ef6\u79fb\u9664")
+    }
+
+    fun deleteTrackFile(track: MusicTrack) {
+        viewModelScope.launch {
+            val wasPlayingTrack = _uiState.value.currentTrack?.uri == track.uri
+            if (wasPlayingTrack) {
+                player.stop()
+            }
+            val result = withContext(Dispatchers.IO) {
+                libraryService.deleteAudioFile(track)
+            }
+            when (result) {
+                FileDeleteResult.SUCCESS -> {
+                    removeTrackFromState(track, message = "\u5df2\u5220\u9664\u97f3\u4e50\u6587\u4ef6")
+                    loadLibrary(_uiState.value.hasAudioPermission)
+                }
+                FileDeleteResult.UNSUPPORTED_SOURCE -> _messages.emit("\u8fd9\u9996\u6b4c\u6765\u81ea\u7cfb\u7edf\u97f3\u4e50\u5e93\uff0c\u6682\u65f6\u4e0d\u80fd\u76f4\u63a5\u5220\u9664\u539f\u6587\u4ef6")
+                FileDeleteResult.NO_PERMISSION -> _messages.emit("\u6ca1\u6709\u6587\u4ef6\u5220\u9664\u6743\u9650\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9\u8fd9\u4e2a\u97f3\u4e50\u6587\u4ef6\u5939")
+                FileDeleteResult.FAILED -> _messages.emit("\u6587\u4ef6\u5220\u9664\u5931\u8d25")
+            }
+        }
+    }
+
+    private fun renameTrackDisplayName(track: MusicTrack, title: String, artist: String, message: String) {
+        val cleanTitle = title.trim()
+        val cleanArtist = artist.trim()
+        if (cleanTitle.isBlank()) return
+        store.renameTrack(track, cleanTitle, cleanArtist)
+
+        val state = _uiState.value
+        val updatedCurrent = state.currentTrack?.let { current ->
+            if (current.uri == track.uri) current.copy(title = cleanTitle, artist = cleanArtist) else current
+        }
+        val updatedTracks = state.tracks.map { item ->
+            if (item.uri == track.uri) item.copy(title = cleanTitle, artist = cleanArtist) else item
+        }
+        val sortedTracks = sortTracks(updatedTracks, state.sortMode)
+        _uiState.value = state.copy(tracks = sortedTracks, currentTrack = updatedCurrent)
+        refreshPlayerQueueForSortedTracks(sortedTracks, updatedCurrent)
+        if (updatedCurrent?.uri == track.uri) {
+            loadLyrics(updatedCurrent)
+        }
+        viewModelScope.launch {
+            _messages.emit(message)
+        }
+    }
+
+    private fun removeTrackFromState(track: MusicTrack, message: String) {
+        val state = _uiState.value
+        val removingCurrent = state.currentTrack?.uri == track.uri
+        if (removingCurrent) {
+            player.stop()
+            lyricsJob?.cancel()
+            lyrics = Lyrics.Empty
+        }
+        val updatedTracks = state.tracks.filterNot { it.uri == track.uri }
+        _uiState.value = state.copy(
+            tracks = updatedTracks,
+            currentTrack = if (removingCurrent) null else state.currentTrack,
+            isPlaying = if (removingCurrent) false else state.isPlaying,
+            positionMs = if (removingCurrent) 0L else state.positionMs,
+            durationMs = if (removingCurrent) 0L else state.durationMs,
+            currentLyric = if (removingCurrent) "\u6682\u65e0\u6b4c\u8bcd" else state.currentLyric,
+            nextLyric = if (removingCurrent) "" else state.nextLyric,
+            plainLyrics = if (removingCurrent) null else state.plainLyrics,
+        )
+        if (!removingCurrent) {
+            refreshPlayerQueueForSortedTracks(updatedTracks, state.currentTrack)
+        }
+        viewModelScope.launch {
+            _messages.emit(message)
+        }
+    }
+
     fun isSystemLibraryEnabled(): Boolean {
         return store.isSystemLibraryEnabled()
     }
@@ -192,7 +284,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun playTrack(track: MusicTrack) {
         val tracks = _uiState.value.tracks
         val index = tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
-        player.setMediaItems(tracks.map { MediaItem.fromUri(it.uri) }, index, 0L)
+        player.setMediaItems(tracks.map { it.toMediaItem() }, index, 0L)
         player.prepare()
         player.play()
         _uiState.value = _uiState.value.copy(currentTrack = track, positionMs = 0L, durationMs = track.durationMs, error = null)
@@ -236,11 +328,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadLyrics(track: MusicTrack) {
-        viewModelScope.launch {
+        lyricsJob?.cancel()
+        lyrics = Lyrics.Empty
+        _uiState.value = _uiState.value.copy(currentLyric = "\u6b63\u5728\u641c\u7d22\u6b4c\u8bcd...", nextLyric = "", plainLyrics = null)
+        lyricsJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(currentLyric = "\u6b63\u5728\u641c\u7d22\u6b4c\u8bcd...", nextLyric = "", plainLyrics = null)
             val raw = withContext(Dispatchers.IO) {
                 libraryService.readLyrics(track) ?: onlineLyricsService.searchLyrics(track)
             }
+            if (_uiState.value.currentTrack?.id != track.id) return@launch
             lyrics = raw?.let { LyricParser.parseEmbeddedLyrics(it) } ?: Lyrics.Empty
             updateProgress()
         }
@@ -259,6 +355,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopProgressUpdates() {
         progressJob?.cancel()
         updateProgress()
+    }
+
+    private fun updateForegroundService(isPlaying: Boolean) {
+        val context = getApplication<Application>()
+        if (isPlaying) {
+            val track = _uiState.value.currentTrack
+            MusicForegroundService.start(
+                context = context,
+                title = track?.title ?: "\u97f3\u4e50\u64ad\u653e\u5668",
+                artist = track?.displayArtist.orEmpty(),
+            )
+            isForegroundServiceRunning = true
+        } else if (isForegroundServiceRunning) {
+            MusicForegroundService.stop(context)
+            isForegroundServiceRunning = false
+        }
     }
 
     private fun updateProgress() {
@@ -290,6 +402,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val track = _uiState.value.tracks.getOrNull(index) ?: return
         if (_uiState.value.currentTrack?.id != track.id) {
             _uiState.value = _uiState.value.copy(currentTrack = track, durationMs = track.durationMs)
+            if (player.isPlaying) updateForegroundService(isPlaying = true)
             if (loadLyricsWhenChanged) loadLyrics(track)
         }
     }
@@ -336,7 +449,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (index < 0) return
         val position = player.currentPosition.coerceAtLeast(0L)
         val shouldPlay = player.isPlaying
-        player.setMediaItems(tracks.map { MediaItem.fromUri(it.uri) }, index, position)
+        player.setMediaItems(tracks.map { it.toMediaItem() }, index, position)
         player.prepare()
         if (shouldPlay) {
             player.play()
@@ -351,6 +464,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         progressJob?.cancel()
+        lyricsJob?.cancel()
+        if (isForegroundServiceRunning) {
+            MusicForegroundService.stop(getApplication())
+        }
+        mediaSession.release()
         player.release()
+    }
+
+    private fun MusicTrack.toMediaItem(): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(displayArtist)
+            .setAlbumTitle(album.ifBlank { null })
+            .build()
+        return MediaItem.Builder()
+            .setMediaId(id)
+            .setUri(uri)
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
+    private fun createSessionActivity(application: Application): PendingIntent {
+        val launchIntent = application.packageManager.getLaunchIntentForPackage(application.packageName)
+        return PendingIntent.getActivity(
+            application,
+            0,
+            launchIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 }

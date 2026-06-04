@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
         if (uri != null) {
             contentResolver.takePersistableUriPermission(
                 uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
             musicViewModelRef?.addFolder(uri, hasAudioPermission())
             Toast.makeText(this, "音乐文件夹已添加", Toast.LENGTH_SHORT).show()
@@ -224,7 +224,6 @@ class MainActivity : ComponentActivity() {
                             onTabSelected = { currentScreen = Screen.Main(it) },
                             toolsContent = {
                                 ToolboxHomeScreenContent(
-                                    isBaiduAuthorized = isAuthorized,
                                     backupCount = backupRecords.size,
                                     isBackupRestoreFavorite = isBackupRestoreFavorite,
                                     isMoviesFavorite = isMoviesFavorite,
@@ -258,7 +257,6 @@ class MainActivity : ComponentActivity() {
                                     isMusicFavorite = isMusicFavorite,
                                     isReaderFavorite = isReaderFavorite,
                                     backupCount = backupRecords.size,
-                                    isBaiduAuthorized = isAuthorized,
                                     onOpenBackupRestore = {
                                         appListViewModel.loadApps()
                                         backupViewModel.loadBackupRecords()
