@@ -1,6 +1,6 @@
 # 我的
 
-`我的` is an Android Kotlin / Jetpack Compose toolbox app. Current version: `1.3`.
+`我的` is an Android Kotlin / Jetpack Compose toolbox app. Current version: `v1.4`.
 
 ## Features
 
@@ -10,7 +10,7 @@
 - Movie tool that opens a configurable site source in a WebView for user-initiated browsing. The default source is `https://www.hhkan0.com/`.
 - Music player that scans system music or selected folders, supports local/online lyrics, Android media controls, track rename/delete actions, and repeat/shuffle modes.
 - Reader for local novels, PDFs, EPUBs, image folders, ZIP comics, and CBZ comics.
-- Startup and manual update checks against [AOthers/Mine GitHub releases](https://github.com/AOthers/Mine/releases).
+- Manual update checks against [AOthers/Mine GitHub releases](https://github.com/AOthers/Mine/releases).
 
 ## Backup And Restore
 
@@ -93,7 +93,7 @@ The reader does not provide online sources, scraping, OCR, cloud sync, encrypted
 
 ## Updates
 
-On app startup, and when the user taps `检查更新` in the `我的` tab, the app checks:
+When the user taps `检查更新` in the `我的` tab, the app checks:
 
 ```text
 https://api.github.com/repos/AOthers/Mine/releases/latest
@@ -105,7 +105,7 @@ If the latest release tag is newer than `BuildConfig.VERSION_NAME`, the app show
 - Skip this update
 - Cancel
 
-The update action downloads the first `.apk` asset from the release and hands it to Android's installer.
+The update action downloads the first `.apk` asset from the release, shows download progress with cancel support, and hands the APK to Android's installer.
 
 Manual update checks ignore the "skip this update" choice so the user can retry a skipped release.
 

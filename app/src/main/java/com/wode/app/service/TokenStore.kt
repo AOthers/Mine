@@ -1,7 +1,6 @@
 package com.wode.app.service
 
 import android.content.Context
-import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.wode.app.data.BaiduToken
@@ -11,18 +10,15 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class TokenStore(context: Context) {
 
-    private val prefs: SharedPreferences = runCatching {
-        val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-        EncryptedSharedPreferences.create(
-            "wode_secure_settings",
-            masterKey,
-            context,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }.getOrElse {
-        context.getSharedPreferences("wode_secure_settings_fallback", Context.MODE_PRIVATE)
-    }
+    private val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+
+    private val prefs = EncryptedSharedPreferences.create(
+        "wode_secure_settings",
+        masterKey,
+        context,
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+    )
 
     private val _isAuthorized = MutableStateFlow(prefs.getBoolean(KEY_IS_AUTHORIZED, false))
     val isAuthorized: StateFlow<Boolean> = _isAuthorized.asStateFlow()

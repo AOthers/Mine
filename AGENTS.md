@@ -4,7 +4,7 @@
 
 Project root: `C:\Users\Aother\Desktop\我的\AppBackup`.
 
-This is an Android Kotlin / Jetpack Compose toolbox app named `我的`. Current app version is `1.3`.
+This is an Android Kotlin / Jetpack Compose toolbox app named `我的`. Current app version is `v1.4`.
 
 ## Build
 
@@ -41,7 +41,7 @@ Before starting any non-trivial feature, bug fix, release, WebView, SAF/storage,
 - `MusicViewModel.kt` owns music scan state, playback state, Media3 session integration, lyric lookup, sort mode, source management, and folder cache refresh decisions.
 - `ReaderViewModel.kt` owns reader imports, library state, selected item loading, progress updates, PDF paging, and reading settings.
 - `BaiduPanService.kt` owns Baidu Pan OAuth, upload, list, filemetas, and download calls.
-- `UpdateService.kt` checks GitHub releases for app updates and downloads release APK assets.
+- `UpdateService.kt` checks GitHub releases for app updates and downloads release APK assets. Update checks are manual from the `我的` tab; do not re-add startup update prompts unless the dialog lifecycle issue is explicitly redesigned.
 - `MusicLibraryService.kt` discovers music through Android `MediaStore` and SAF folder traversal.
 - `ReaderImportService.kt` imports SAF files/folders into the local reader library.
 - `ReaderLibraryStore.kt` persists reader library entries, progress, and reading settings.
@@ -85,7 +85,7 @@ Before starting any non-trivial feature, bug fix, release, WebView, SAF/storage,
 - Comic archives must reject unsafe zip entries such as absolute paths or `..` segments before extracting to cache.
 - Update checking compares the installed `BuildConfig.VERSION_NAME` with the latest GitHub release tag from `AOthers/Mine`. Release tags may use a leading `v`; the app strips it for comparison.
 - Update downloads use the first `.apk` asset from the latest GitHub release and then hand off to Android's package installer.
-- Manual update checks live in the `我的` tab and ignore any skipped release tag so users can retry a skipped update.
+- Manual update checks live in the `我的` tab, ignore any skipped release tag so users can retry a skipped update, and show APK download progress with cancel support.
 
 ## Navigation
 

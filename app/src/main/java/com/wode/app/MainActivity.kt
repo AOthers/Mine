@@ -236,6 +236,7 @@ class MainActivity : ComponentActivity() {
                             onTabSelected = { currentScreen = Screen.Main(it) },
                             toolsContent = {
                                 ToolboxHomeScreenContent(
+                                    isBaiduAuthorized = isAuthorized,
                                     backupCount = backupRecords.size,
                                     isBackupRestoreFavorite = isBackupRestoreFavorite,
                                     isMoviesFavorite = isMoviesFavorite,
@@ -269,6 +270,7 @@ class MainActivity : ComponentActivity() {
                                     isMusicFavorite = isMusicFavorite,
                                     isReaderFavorite = isReaderFavorite,
                                     backupCount = backupRecords.size,
+                                    isBaiduAuthorized = isAuthorized,
                                     onOpenBackupRestore = {
                                         appListViewModel.loadApps()
                                         backupViewModel.loadBackupRecords()
@@ -443,11 +445,7 @@ class MainActivity : ComponentActivity() {
 
     private fun startOAuth(appKey: String) {
         val oauthUrl = panService.getOAuthUrl(appKey)
-        runCatching {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl)))
-        }.onFailure {
-            Toast.makeText(this, "无法打开授权页面：${it.message}", Toast.LENGTH_LONG).show()
-        }
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl)))
     }
 
     private suspend fun handleOAuthCallback(intent: Intent?, backupViewModel: BackupViewModel) {

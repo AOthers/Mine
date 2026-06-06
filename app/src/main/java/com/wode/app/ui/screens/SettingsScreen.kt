@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -130,11 +129,7 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = if (isAuthorized) {
-                                "百度网盘已连接，可用于备份和恢复。"
-                            } else {
-                                "配置密钥并授权后才能使用网盘能力。"
-                            },
+                            text = if (isAuthorized) "百度网盘已连接，可用于备份和恢复" else "配置密钥并授权后才能使用网盘能力",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -142,7 +137,7 @@ fun SettingsScreen(
                     if (isAuthorized) {
                         TextButton(
                             onClick = { viewModel.logout() },
-                            colors = ButtonDefaults.textButtonColors(
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error,
                             ),
                         ) {
@@ -190,11 +185,7 @@ fun SettingsScreen(
                             onClick = {
                                 appKey = appKey.trim()
                                 secretKey = secretKey.trim()
-                                runCatching {
-                                    tokenStore.saveCredentials(appKey, secretKey)
-                                }.onFailure {
-                                    onPathSaved("保存失败：${it.message}")
-                                }
+                                tokenStore.saveCredentials(appKey, secretKey)
                             },
                             modifier = Modifier.weight(1f),
                         ) {
@@ -204,13 +195,8 @@ fun SettingsScreen(
                             onClick = {
                                 appKey = appKey.trim()
                                 secretKey = secretKey.trim()
-                                runCatching {
-                                    tokenStore.saveCredentials(appKey, secretKey)
-                                }.onSuccess {
-                                    if (appKey.isNotBlank()) onStartOAuth(appKey)
-                                }.onFailure {
-                                    onPathSaved("保存失败：${it.message}")
-                                }
+                                tokenStore.saveCredentials(appKey, secretKey)
+                                if (appKey.isNotBlank()) onStartOAuth(appKey)
                             },
                             modifier = Modifier.weight(1f),
                             enabled = appKey.isNotBlank(),
@@ -307,7 +293,7 @@ fun SettingsScreen(
                     )
                     StrategyRow(
                         title = "覆盖",
-                        subtitle = "同一应用同一版本再次备份时覆盖原文件。",
+                        subtitle = "同一应用同一版本再次备份时覆盖原文件",
                         selected = sameVersionStrategy == TokenStore.SameVersionStrategy.OVERWRITE,
                         onClick = {
                             sameVersionStrategy = TokenStore.SameVersionStrategy.OVERWRITE
@@ -316,7 +302,7 @@ fun SettingsScreen(
                     )
                     StrategyRow(
                         title = "另存",
-                        subtitle = "同一应用同一版本再次备份时保留一份带时间的新文件。",
+                        subtitle = "同一应用同一版本再次备份时保留一份带时间的新文件",
                         selected = sameVersionStrategy == TokenStore.SameVersionStrategy.SAVE_AS_COPY,
                         onClick = {
                             sameVersionStrategy = TokenStore.SameVersionStrategy.SAVE_AS_COPY
@@ -367,7 +353,7 @@ private fun ApiKeyTutorialDialog(onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("1. 打开百度网盘开放平台，登录你的百度账号。")
-                Text("2. 创建一个网盘应用。")
+                Text("2. 创建一个应用，应用类型选择适合个人使用的网盘应用。")
                 Text("3. 在应用配置里找到 AppKey 和 SecretKey，并复制到本页面。")
                 Text("4. OAuth 回调地址填写：wode://baidu.oauth")
                 Text("5. 回到本页面，点击“保存并授权”，浏览器授权成功后会自动回到应用。")
