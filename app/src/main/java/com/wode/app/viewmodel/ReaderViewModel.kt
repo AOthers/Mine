@@ -3,6 +3,7 @@ package com.wode.app.viewmodel
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wode.app.data.ComicImage
@@ -51,6 +52,11 @@ sealed class ReaderEvent {
     data class Toast(val message: String) : ReaderEvent()
 }
 
+private data class CachedTextContent(
+    val content: TextContent,
+    val chapters: List<ReaderChapter>,
+)
+
 class ReaderViewModel(application: Application) : AndroidViewModel(application) {
     private val store = ReaderLibraryStore(application)
     private val importer = ReaderImportService(application)
@@ -59,6 +65,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private val comicReader = ComicReaderService(application)
     private val pdfReader = PdfReaderService(application)
     private val loadingPdfPages = mutableSetOf<Int>()
+    private val textContentCache = object : LinkedHashMap<String, CachedTextContent>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedTextContent>): Boolean {
+            return size > 3
+        }
+    }
 
     private val _uiState = MutableStateFlow(
         ReaderUiState(
@@ -73,7 +84,8 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addFile(uri: Uri) {
         viewModelScope.launch {
-            importer.importFile(uri)
+            runCatching { importer.importFile(uri) }
+                .getOrElse { Result.failure(it) }
                 .onSuccess { addImportedItems(it) }
                 .onFailure { emitToast(it.message ?: "导入失败") }
         }
@@ -81,14 +93,25 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addFolder(uri: Uri) {
         viewModelScope.launch {
-            importer.importFolder(uri)
+            runCatching { importer.importFolder(uri) }
+                .getOrElse { Result.failure(it) }
                 .onSuccess { addImportedItems(it) }
                 .onFailure { emitToast(it.message ?: "导入失败") }
         }
     }
 
-    fun removeItem(item: ReaderItem) {
-        _uiState.value = _uiState.value.copy(items = store.removeItem(item.id))
+    fun removeItem(item: ReaderItem, deleteSource: Boolean) {
+        viewModelScope.launch {
+            if (deleteSource) {
+                withContext(Dispatchers.IO) { deleteSourceFile(item) }
+                    .onFailure {
+                        emitToast("源文件删除失败：${it.message ?: "未知错误"}")
+                        return@launch
+                    }
+            }
+            _uiState.value = _uiState.value.copy(items = store.removeItem(item.id))
+            emitToast(if (deleteSource) "已删除源文件" else "已从软件中移除")
+        }
     }
 
     fun renameItem(item: ReaderItem, title: String) {
@@ -97,28 +120,37 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openItem(item: ReaderItem) {
         val latestItem = store.resolveItem(item)
+        val cachedText = if (latestItem.type == ReaderItemType.TEXT || latestItem.type == ReaderItemType.EPUB) {
+            textContentCache[latestItem.cacheKey()]
+        } else {
+            null
+        }
         _uiState.value = _uiState.value.copy(
             selectedItem = latestItem,
-            textContent = null,
+            textContent = cachedText?.content,
             comicImages = emptyList(),
             pdfPage = null,
             pdfPages = emptyMap(),
-            isLoading = true,
+            isLoading = cachedText == null,
             errorMessage = null,
-            chapters = emptyList(),
+            chapters = cachedText?.chapters ?: emptyList(),
             currentIndex = latestItem.progressIndex.coerceAtLeast(0),
             jumpToIndex = null,
         )
         viewModelScope.launch {
-            when (latestItem.type) {
-                ReaderItemType.TEXT -> loadText(latestItem)
-                ReaderItemType.EPUB -> loadEpub(latestItem)
-                ReaderItemType.PDF -> loadPdf(latestItem, store.getSavedIndex(latestItem))
-                ReaderItemType.COMIC_FOLDER -> loadComicFolder(latestItem)
-                ReaderItemType.COMIC_ARCHIVE -> loadComicArchive(latestItem)
+            runCatching {
+                when (latestItem.type) {
+                    ReaderItemType.TEXT -> loadText(latestItem)
+                    ReaderItemType.EPUB -> loadEpub(latestItem)
+                    ReaderItemType.PDF -> loadPdf(latestItem, store.getSavedIndex(latestItem))
+                    ReaderItemType.COMIC_FOLDER -> loadComicFolder(latestItem)
+                    ReaderItemType.COMIC_ARCHIVE -> loadComicArchive(latestItem)
+                }
+                store.markOpened(latestItem.id)
+                _uiState.value = _uiState.value.copy(items = store.getItems())
+            }.onFailure {
+                showReaderError(it, "阅读项目打开失败")
             }
-            store.markOpened(latestItem.id)
-            _uiState.value = _uiState.value.copy(items = store.getItems())
         }
     }
 
@@ -213,13 +245,20 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun loadText(item: ReaderItem) {
+        textContentCache[item.cacheKey()]?.let { cached ->
+            showCachedText(item, cached)
+            return
+        }
         val result = withContext(Dispatchers.IO) { textReader.load(Uri.parse(item.sourceUri), item.title) }
         result.onSuccess { content ->
             val blocks = paginateTextBlocks(content.blocks)
             val initialIndex = savedIndex(item, blocks.size)
+            val chapters = buildTextChapters(blocks, content.chapters)
+            val cached = CachedTextContent(content.copy(blocks = blocks), chapters)
+            textContentCache[item.cacheKey()] = cached
             _uiState.value = _uiState.value.copy(
-                textContent = content.copy(blocks = blocks),
-                chapters = buildTextChapters(blocks, content.chapters),
+                textContent = cached.content,
+                chapters = cached.chapters,
                 isLoading = false,
                 errorMessage = null,
                 currentIndex = initialIndex,
@@ -231,13 +270,20 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun loadEpub(item: ReaderItem) {
+        textContentCache[item.cacheKey()]?.let { cached ->
+            showCachedText(item, cached)
+            return
+        }
         val result = withContext(Dispatchers.IO) { epubReader.load(Uri.parse(item.sourceUri), item.title) }
         result.onSuccess { content ->
             val blocks = paginateTextBlocks(content.blocks)
             val initialIndex = savedIndex(item, blocks.size)
+            val chapters = buildTextChapters(blocks, content.chapters)
+            val cached = CachedTextContent(content.copy(blocks = blocks), chapters)
+            textContentCache[item.cacheKey()] = cached
             _uiState.value = _uiState.value.copy(
-                textContent = content.copy(blocks = blocks),
-                chapters = buildTextChapters(blocks, content.chapters),
+                textContent = cached.content,
+                chapters = cached.chapters,
                 isLoading = false,
                 errorMessage = null,
                 currentIndex = initialIndex,
@@ -362,12 +408,72 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         return blocks.flatMap { block ->
             when (block) {
                 is ReaderContentBlock.Image -> listOf(block)
-                is ReaderContentBlock.Text -> block.text
-                    .split('\n')
-                    .chunked(12)
-                    .map { ReaderContentBlock.Text(it.joinToString("\n")) }
+                is ReaderContentBlock.Text -> paginateText(block.text)
             }
         }
+    }
+
+    private fun showCachedText(item: ReaderItem, cached: CachedTextContent) {
+        val initialIndex = savedIndex(item, cached.content.blocks.size)
+        _uiState.value = _uiState.value.copy(
+            textContent = cached.content,
+            chapters = cached.chapters,
+            isLoading = false,
+            errorMessage = null,
+            currentIndex = initialIndex,
+            jumpToIndex = null,
+        )
+    }
+
+    private fun paginateText(text: String): List<ReaderContentBlock.Text> {
+        val paragraphs = text
+            .replace("\r\n", "\n")
+            .split(Regex("""\n{2,}"""))
+            .map { it.trim('\n') }
+            .filter { it.isNotBlank() }
+        val pages = mutableListOf<String>()
+        val current = StringBuilder()
+        var currentSize = 0
+        paragraphs.forEach { paragraph ->
+            val normalized = paragraph.lines().joinToString("\n") { it.trimEnd() }
+            val size = normalized.length + normalized.count { it == '\n' } * 12
+            val startsChapter = normalized
+                .lineSequence()
+                .firstOrNull()
+                ?.trim()
+                ?.let(::isChapterTitle) == true
+            if (current.isNotEmpty() && (startsChapter || currentSize + size > TEXT_PAGE_CHAR_BUDGET)) {
+                pages += current.toString().trim()
+                current.clear()
+                currentSize = 0
+            }
+            if (current.isNotEmpty()) {
+                current.append("\n\n")
+                currentSize += 24
+            }
+            current.append(normalized)
+            currentSize += size
+        }
+        if (current.isNotEmpty()) pages += current.toString().trim()
+        return pages.ifEmpty { listOf(text) }.map { ReaderContentBlock.Text(it) }
+    }
+
+    private fun deleteSourceFile(item: ReaderItem): Result<Unit> = runCatching {
+        val app = getApplication<Application>()
+        val uri = Uri.parse(item.sourceUri)
+        val document = DocumentFile.fromSingleUri(app, uri)
+            ?: DocumentFile.fromTreeUri(app, uri)
+            ?: throw IllegalArgumentException("无法访问源文件")
+        if (!document.exists()) return@runCatching
+        if (!document.delete()) throw IllegalStateException("系统拒绝删除")
+    }
+
+    private fun isChapterTitle(line: String): Boolean {
+        return CHAPTER_TITLE_REGEX.containsMatchIn(line)
+    }
+
+    private fun ReaderItem.cacheKey(): String {
+        return "$id|$type|$sourceUri|$title"
     }
 
     private fun progressToIndex(progress: Float, total: Int): Int {
@@ -426,5 +532,13 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _events.emit(ReaderEvent.Toast(message))
         }
+    }
+
+    companion object {
+        private const val TEXT_PAGE_CHAR_BUDGET = 900
+        private val CHAPTER_TITLE_REGEX = Regex(
+            """^\s*(序章|楔子|引子|前言|后记|尾声|第\s*[一二三四五六七八九十百千万零〇两\d]+\s*[章节回卷部篇集]|Chapter\s+\d+|\d+[\.、]\s*.+)""",
+            RegexOption.IGNORE_CASE,
+        )
     }
 }

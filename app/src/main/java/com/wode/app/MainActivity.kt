@@ -1,20 +1,22 @@
 package com.wode.app
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +56,8 @@ import com.wode.app.viewmodel.MusicViewModel
 import com.wode.app.viewmodel.ReaderEvent
 import com.wode.app.viewmodel.ReaderViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 
 class MainActivity : ComponentActivity() {
 
@@ -74,8 +78,17 @@ class MainActivity : ComponentActivity() {
     private var isMoviesFavorite by mutableStateOf(false)
     private var isMusicFavorite by mutableStateOf(false)
     private var isReaderFavorite by mutableStateOf(false)
-    private var pendingUpdate by mutableStateOf<UpdateInfo?>(null)
+    private var pendingUpdate: UpdateInfo? = null
     private var isDownloadingUpdate by mutableStateOf(false)
+    private var updateDownloadProgress by mutableStateOf(0f)
+    private var updateDownloadJob: Job? = null
+    private var updateCheckJob: Job? = null
+    private var hasCheckedUpdateOnLaunch = false
+    private var dismissedUpdateTagThisSession: String? = null
+    private var updateDialog: AlertDialog? = null
+    private var updateProgressBar: ProgressBar? = null
+    private var updateProgressText: TextView? = null
+    private var isActivityResumed = false
     private var pendingEnableSystemLibraryAfterPermission = false
 
     private val chooseRestoreFolderLauncher = registerForActivityResult(
@@ -108,7 +121,9 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             readerViewModelRef?.addFile(uri)
         }
     }
@@ -117,7 +132,9 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             readerViewModelRef?.addFolder(uri)
         }
     }
@@ -201,11 +218,6 @@ class MainActivity : ComponentActivity() {
                             is InstallEvent.InstallUri -> installApk(event.uri)
                         }
                     }
-                }
-
-                LaunchedEffect(Unit) {
-                    updateService.checkForUpdate()
-                        .onSuccess { update -> pendingUpdate = update }
                 }
 
                 LaunchedEffect(Unit) {
@@ -301,7 +313,6 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             viewModel = backupViewModel,
                             tokenStore = tokenStore,
-                            movieSourceStore = movieSourceStore,
                             onBack = { currentScreen = Screen.BackupRestoreHome },
                             onStartOAuth = { appKey ->
                                 pendingAppKey = appKey
@@ -386,18 +397,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                pendingUpdate?.let { update ->
-                    UpdateDialog(
-                        update = update,
-                        isDownloading = isDownloadingUpdate,
-                        onUpdate = { startUpdateDownload(update) },
-                        onSkip = {
-                            updateService.skipUpdate(update.tagName)
-                            pendingUpdate = null
-                        },
-                        onCancel = { pendingUpdate = null },
-                    )
-                }
             }
         }
     }
@@ -405,6 +404,17 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         latestIntent = intent
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isActivityResumed = true
+        showPendingUpdateWhenReady()
+    }
+
+    override fun onPause() {
+        isActivityResumed = false
+        super.onPause()
     }
 
     private fun shouldHandleSystemBack(): Boolean {
@@ -433,7 +443,11 @@ class MainActivity : ComponentActivity() {
 
     private fun startOAuth(appKey: String) {
         val oauthUrl = panService.getOAuthUrl(appKey)
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl)))
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl)))
+        }.onFailure {
+            Toast.makeText(this, "无法打开授权页面：${it.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private suspend fun handleOAuthCallback(intent: Intent?, backupViewModel: BackupViewModel) {
@@ -505,21 +519,193 @@ class MainActivity : ComponentActivity() {
         installApk(uri)
     }
 
+    private fun checkUpdateOnLaunch() {
+        if (hasCheckedUpdateOnLaunch) return
+        hasCheckedUpdateOnLaunch = true
+        updateCheckJob = lifecycleScope.launch {
+            updateService.clearSkippedUpdate()
+            updateService.checkForUpdate(ignoreSkipped = true)
+                .onSuccess { update ->
+                    if (update != null) showUpdateIfAllowed(update)
+                }
+        }
+    }
+
+    private fun showUpdateIfAllowed(update: UpdateInfo, force: Boolean = false) {
+        if (!force && dismissedUpdateTagThisSession == update.tagName) return
+        if (isDownloadingUpdate) return
+        pendingUpdate = update
+        showPendingUpdateWhenReady()
+    }
+
+    private fun showPendingUpdateWhenReady() {
+        pendingUpdate ?: return
+        if (!isActivityResumed || isFinishing || isDestroyed) return
+        if (isDownloadingUpdate) return
+        if (updateDialog?.isShowing == true) return
+        window.decorView.post {
+            val latest = pendingUpdate ?: return@post
+            if (isActivityResumed && !isFinishing && !isDestroyed && updateDialog?.isShowing != true) {
+                showNativeUpdateDialog(latest)
+            }
+        }
+    }
+
+    private fun showNativeUpdateDialog(update: UpdateInfo) {
+        if (!isActivityResumed || isFinishing || isDestroyed) return
+        updateDialog?.let { oldDialog ->
+            updateDialog = null
+            oldDialog.dismiss()
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 20, 48, 0)
+        }
+        content.addView(TextView(this).apply {
+            text = buildString {
+                append(update.releaseName)
+                if (update.body.isNotBlank()) {
+                    append("\n\n")
+                    append(update.body.take(300))
+                }
+            }
+        })
+        updateProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = 0
+            visibility = View.GONE
+        }
+        updateProgressText = TextView(this).apply {
+            text = "下载中 0%"
+            visibility = View.GONE
+        }
+        content.addView(updateProgressBar)
+        content.addView(updateProgressText)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("发现新版本 ${update.versionName}")
+            .setView(content)
+            .setPositiveButton("更新", null)
+            .setNegativeButton("取消", null)
+            .setNeutralButton("跳过这次更新", null)
+            .create()
+        updateDialog = dialog
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                startUpdateDownload(update)
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                cancelUpdateDialog()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                if (!isDownloadingUpdate) {
+                    updateService.skipUpdate(update.tagName)
+                    dismissedUpdateTagThisSession = update.tagName
+                    pendingUpdate = null
+                    dialog.dismiss()
+                }
+            }
+        }
+        dialog.setOnDismissListener {
+            if (updateDialog === dialog) {
+                updateDialog = null
+                updateProgressBar = null
+                updateProgressText = null
+            }
+            schedulePendingUpdateDialogReshow()
+        }
+        dialog.setCancelable(false)
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.show()
+        verifyUpdateDialogStillShowing(dialog)
+    }
+
+    private fun schedulePendingUpdateDialogReshow() {
+        if (pendingUpdate == null || isDownloadingUpdate || !isActivityResumed || isFinishing || isDestroyed) return
+        window.decorView.postDelayed({
+            showPendingUpdateWhenReady()
+        }, 350L)
+    }
+
+    private fun verifyUpdateDialogStillShowing(dialog: AlertDialog) {
+        window.decorView.postDelayed({
+            if (pendingUpdate == null || isDownloadingUpdate || !isActivityResumed || isFinishing || isDestroyed) return@postDelayed
+            if (updateDialog === dialog && dialog.isShowing) return@postDelayed
+            if (updateDialog === dialog) {
+                updateDialog = null
+                updateProgressBar = null
+                updateProgressText = null
+            }
+            schedulePendingUpdateDialogReshow()
+        }, 500L)
+    }
+
     private fun startUpdateDownload(update: UpdateInfo) {
         if (isDownloadingUpdate) return
         isDownloadingUpdate = true
+        updateDownloadProgress = 0f
+        updateDialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
+        updateDialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.isEnabled = false
+        updateDialog?.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "取消下载"
+        updateProgressBar?.visibility = View.VISIBLE
+        updateProgressText?.visibility = View.VISIBLE
         Toast.makeText(this, "正在下载更新...", Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch {
-            updateService.downloadApk(update)
-                .onSuccess { file ->
-                    pendingUpdate = null
-                    installApk(file)
+        updateDownloadJob = lifecycleScope.launch {
+            try {
+                updateService.downloadApk(update) { progress ->
+                    updateDownloadProgress = progress
+                    runOnUiThread { updateNativeDownloadProgress(progress) }
                 }
-                .onFailure {
-                    Toast.makeText(this@MainActivity, "下载更新失败：${it.message}", Toast.LENGTH_LONG).show()
-                }
-            isDownloadingUpdate = false
+                    .onSuccess { file ->
+                        pendingUpdate = null
+                        updateDialog?.dismiss()
+                        installApk(file)
+                    }
+                    .onFailure {
+                        Toast.makeText(this@MainActivity, "下载更新失败：${it.message}", Toast.LENGTH_LONG).show()
+                    }
+            } catch (_: CancellationException) {
+                Toast.makeText(this@MainActivity, "已取消下载", Toast.LENGTH_SHORT).show()
+            } finally {
+                isDownloadingUpdate = false
+                updateDownloadProgress = 0f
+                updateDownloadJob = null
+                runOnUiThread { resetNativeUpdateDialogButtons() }
+            }
         }
+    }
+
+    private fun updateNativeDownloadProgress(progress: Float) {
+        val percent = (progress.coerceIn(0f, 1f) * 100).toInt()
+        updateProgressBar?.progress = percent
+        updateProgressText?.text = "下载中 $percent%"
+    }
+
+    private fun resetNativeUpdateDialogButtons() {
+        updateDialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true
+        updateDialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.isEnabled = true
+        updateDialog?.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "取消"
+        updateProgressBar?.visibility = View.GONE
+        updateProgressText?.visibility = View.GONE
+    }
+
+    private fun cancelUpdateDialog() {
+        if (isDownloadingUpdate) {
+            updateDownloadJob?.cancel()
+        } else {
+            pendingUpdate?.let { dismissedUpdateTagThisSession = it.tagName }
+            pendingUpdate = null
+            updateDownloadProgress = 0f
+            updateDownloadJob = null
+            updateDialog?.dismiss()
+        }
+    }
+
+    override fun onDestroy() {
+        updateCheckJob?.cancel()
+        updateDownloadJob?.cancel()
+        updateDialog?.dismiss()
+        super.onDestroy()
     }
 
     private fun checkUpdateManually() {
@@ -530,7 +716,9 @@ class MainActivity : ComponentActivity() {
                     if (update == null) {
                         Toast.makeText(this@MainActivity, "已是最新版本", Toast.LENGTH_SHORT).show()
                     } else {
-                        pendingUpdate = update
+                        updateService.clearSkippedUpdate()
+                        dismissedUpdateTagThisSession = null
+                        showUpdateIfAllowed(update, force = true)
                     }
                 }
                 .onFailure {
@@ -611,45 +799,4 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val REQUEST_POST_NOTIFICATIONS = 2001
     }
-}
-
-@Composable
-private fun UpdateDialog(
-    update: UpdateInfo,
-    isDownloading: Boolean,
-    onUpdate: () -> Unit,
-    onSkip: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("发现新版本 ${update.versionName}") },
-        text = {
-            Text(
-                text = buildString {
-                    append(update.releaseName)
-                    if (update.body.isNotBlank()) {
-                        append("\n\n")
-                        append(update.body.take(300))
-                    }
-                },
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onUpdate,
-                enabled = !isDownloading,
-            ) {
-                Text(if (isDownloading) "下载中..." else "更新")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onSkip, enabled = !isDownloading) {
-                Text("跳过这次更新")
-            }
-            TextButton(onClick = onCancel, enabled = !isDownloading) {
-                Text("取消")
-            }
-        },
-    )
 }

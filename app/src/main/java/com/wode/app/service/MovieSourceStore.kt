@@ -2,7 +2,6 @@ package com.wode.app.service
 
 import android.content.Context
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.wode.app.data.MovieSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,8 +61,7 @@ class MovieSourceStore(context: Context) {
 
     private fun loadSources(): List<MovieSource> {
         val raw = prefs.getString(KEY_SOURCES, null) ?: return listOf(DEFAULT_SOURCE)
-        val type = object : TypeToken<List<MovieSource>>() {}.type
-        val saved = runCatching { gson.fromJson<List<MovieSource>>(raw, type) }
+        val saved = runCatching { gson.fromJson(raw, Array<MovieSource>::class.java).toList() }
             .getOrNull()
             .orEmpty()
             .mapNotNull { source ->

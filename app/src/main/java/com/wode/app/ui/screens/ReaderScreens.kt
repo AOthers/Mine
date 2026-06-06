@@ -1,6 +1,9 @@
 ﻿package com.wode.app.ui.screens
 
 import android.content.res.Configuration
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -72,6 +75,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -157,7 +161,7 @@ private fun ReaderBookshelfScreen(
     onAddFile: () -> Unit,
     onAddFolder: () -> Unit,
     onOpen: (ReaderItem) -> Unit,
-    onRemove: (ReaderItem) -> Unit,
+    onRemove: (ReaderItem, Boolean) -> Unit,
     onRename: (ReaderItem, String) -> Unit,
 ) {
     Scaffold(
@@ -212,7 +216,7 @@ private fun ReaderBookshelfScreen(
                     ReaderItemCard(
                         item = item,
                         onOpen = { onOpen(item) },
-                        onRemove = { onRemove(item) },
+                        onRemove = { deleteSource -> onRemove(item, deleteSource) },
                         onRename = { title -> onRename(item, title) },
                     )
                 }
@@ -226,10 +230,11 @@ private fun ReaderBookshelfScreen(
 private fun ReaderItemCard(
     item: ReaderItem,
     onOpen: () -> Unit,
-    onRemove: () -> Unit,
+    onRemove: (Boolean) -> Unit,
     onRename: (String) -> Unit,
 ) {
     var showRename by remember { mutableStateOf(false) }
+    var showDelete by remember { mutableStateOf(false) }
     var title by remember(item.title) { mutableStateOf(item.title) }
     Card(
         modifier = Modifier
@@ -257,7 +262,7 @@ private fun ReaderItemCard(
                 Text(item.displayPath, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(item.progressLabel.ifBlank { "未开始" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
-            IconButton(onClick = onRemove) {
+            IconButton(onClick = { showDelete = true }) {
                 Icon(Icons.Default.Delete, contentDescription = "移除")
             }
         }
@@ -284,6 +289,38 @@ private fun ReaderItemCard(
             },
             dismissButton = {
                 TextButton(onClick = { showRename = false }) { Text("取消") }
+            },
+        )
+    }
+    if (showDelete) {
+        AlertDialog(
+            onDismissRequest = { showDelete = false },
+            title = { Text("删除阅读项目") },
+            text = { Text("要如何删除“${item.title}”？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDelete = false
+                        onRemove(true)
+                    },
+                ) {
+                    Text("删除源文件", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showDelete = false
+                            onRemove(false)
+                        },
+                    ) {
+                        Text("仅在软件中删除")
+                    }
+                    TextButton(onClick = { showDelete = false }) {
+                        Text("取消")
+                    }
+                }
             },
         )
     }
@@ -380,34 +417,39 @@ private fun TextReaderContent(
     onProgress: (Int, Int) -> Unit,
     onJumpConsumed: () -> Unit,
 ) {
+    if (settings.pageMode == ReaderPageMode.PAGE) {
+        TextPageReaderContent(
+            blocks = blocks,
+            initialIndex = initialIndex,
+            settings = settings,
+            background = background,
+            textColor = textColor,
+            modifier = modifier,
+            jumpToIndex = jumpToIndex,
+            onProgress = onProgress,
+            onJumpConsumed = onJumpConsumed,
+        )
+        return
+    }
+
     val safeInitial = initialIndex.coerceIn(0, blocks.size - 1)
     val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = if (settings.pageMode == ReaderPageMode.SCROLL) safeInitial else 0,
+        initialFirstVisibleItemIndex = safeInitial,
     )
-    val pagerState = rememberPagerState(
-        initialPage = if (settings.pageMode == ReaderPageMode.PAGE) safeInitial else 0,
-    ) { blocks.size.coerceAtLeast(1) }
-    val scope = rememberCoroutineScope()
     var readyToSave by remember { mutableStateOf(false) }
     var lastReportedIndex by remember { mutableStateOf(safeInitial) }
     val currentIndex by remember {
-        derivedStateOf {
-            if (settings.pageMode == ReaderPageMode.PAGE) pagerState.currentPage else listState.firstVisibleItemIndex
-        }
+        derivedStateOf { listState.firstVisibleItemIndex }
     }
 
     LaunchedEffect(Unit) {
         lastReportedIndex = currentIndex.coerceIn(0, blocks.size - 1)
         readyToSave = true
     }
-    LaunchedEffect(jumpToIndex, settings.pageMode, blocks.size) {
+    LaunchedEffect(jumpToIndex, blocks.size) {
         val target = jumpToIndex ?: return@LaunchedEffect
         val safeTarget = target.coerceIn(0, blocks.size - 1)
-        if (settings.pageMode == ReaderPageMode.PAGE) {
-            pagerState.scrollToPage(safeTarget)
-        } else {
-            listState.scrollToItem(safeTarget)
-        }
+        listState.scrollToItem(safeTarget)
         lastReportedIndex = safeTarget
         onProgress(safeTarget, blocks.size)
         onJumpConsumed()
@@ -419,40 +461,95 @@ private fun TextReaderContent(
         }
     }
 
-    if (settings.pageMode == ReaderPageMode.PAGE) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(background)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-        ) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-            ) { index ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pageTapNavigation(
-                            onPrevious = { scope.launch { pagerState.scrollToPage((pagerState.currentPage - 1).coerceAtLeast(0)) } },
-                            onNext = { scope.launch { pagerState.scrollToPage((pagerState.currentPage + 1).coerceAtMost(blocks.size - 1)) } },
-                        ),
-                ) {
-                    ReaderBlock(block = blocks[index], settings = settings, textColor = textColor)
-                }
+    LazyColumn(
+        state = listState,
+        modifier = modifier
+            .fillMaxSize()
+            .background(background)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        items(blocks) { block ->
+            ReaderBlock(block = block, settings = settings, textColor = textColor)
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TextPageReaderContent(
+    blocks: List<ReaderContentBlock>,
+    initialIndex: Int,
+    settings: ReaderSettings,
+    background: Color,
+    textColor: Color,
+    modifier: Modifier,
+    jumpToIndex: Int?,
+    onProgress: (Int, Int) -> Unit,
+    onJumpConsumed: () -> Unit,
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(background)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        val density = LocalDensity.current
+        val pageWidthPx = with(density) { maxWidth.roundToPx() }
+        val pageHeightPx = with(density) { maxHeight.roundToPx() }
+        val pages = remember(blocks, settings.fontSizeSp, settings.firstLineIndent, pageWidthPx, pageHeightPx, density.density) {
+            paginateBlocksForPageMode(
+                blocks = blocks,
+                settings = settings,
+                pageWidthPx = pageWidthPx,
+                pageHeightPx = pageHeightPx,
+                density = density.density,
+            )
+        }
+        val pageCount = pages.size.coerceAtLeast(1)
+        val safeInitial = pages.indexOfFirst { it.sourceIndex >= initialIndex }
+            .takeIf { it >= 0 }
+            ?: initialIndex.coerceIn(0, pageCount - 1)
+        val pagerState = rememberPagerState(initialPage = safeInitial) { pageCount }
+        val scope = rememberCoroutineScope()
+        var readyToSave by remember { mutableStateOf(false) }
+        var lastReportedIndex by remember { mutableStateOf(safeInitial) }
+        val currentIndex by remember { derivedStateOf { pagerState.currentPage } }
+
+        LaunchedEffect(Unit) {
+            lastReportedIndex = currentIndex.coerceIn(0, pageCount - 1)
+            readyToSave = true
+        }
+        LaunchedEffect(jumpToIndex, pageCount) {
+            val target = jumpToIndex ?: return@LaunchedEffect
+            val safeTarget = pages.indexOfFirst { it.sourceIndex >= target }
+                .takeIf { it >= 0 }
+                ?: target.coerceIn(0, pageCount - 1)
+            pagerState.scrollToPage(safeTarget)
+            lastReportedIndex = safeTarget
+            onProgress(pages[safeTarget].sourceIndex, blocks.size)
+            onJumpConsumed()
+        }
+        LaunchedEffect(currentIndex, jumpToIndex, readyToSave) {
+            if (jumpToIndex == null && readyToSave && currentIndex != lastReportedIndex) {
+                lastReportedIndex = currentIndex
+                onProgress(pages[currentIndex].sourceIndex, blocks.size)
             }
         }
-    } else {
-        LazyColumn(
-            state = listState,
-            modifier = modifier
-                .fillMaxSize()
-                .background(background)
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            items(blocks) { block ->
-                ReaderBlock(block = block, settings = settings, textColor = textColor)
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+        ) { index ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pageTapNavigation(
+                        onPrevious = { scope.launch { pagerState.scrollToPage((pagerState.currentPage - 1).coerceAtLeast(0)) } },
+                        onNext = { scope.launch { pagerState.scrollToPage((pagerState.currentPage + 1).coerceAtMost(pageCount - 1)) } },
+                    ),
+            ) {
+                ReaderBlock(block = pages[index].block, settings = settings, textColor = textColor, applyFirstLineIndent = false)
             }
         }
     }
@@ -663,7 +760,7 @@ private fun PdfReaderScreen(
         val target = state.jumpToIndex ?: return@LaunchedEffect
         if (state.pdfPageCount > 0) {
             val safeTarget = target.coerceIn(0, state.pdfPageCount - 1)
-            listState.animateScrollToItem(safeTarget)
+            listState.scrollToItem(safeTarget)
             lastReportedIndex = safeTarget
             onProgress(safeTarget, 0)
         }
@@ -852,10 +949,15 @@ private fun ReaderTopBar(
 }
 
 @Composable
-private fun ReaderBlock(block: ReaderContentBlock, settings: ReaderSettings, textColor: Color) {
+private fun ReaderBlock(
+    block: ReaderContentBlock,
+    settings: ReaderSettings,
+    textColor: Color,
+    applyFirstLineIndent: Boolean = true,
+) {
     when (block) {
         is ReaderContentBlock.Text -> Text(
-            text = if (settings.firstLineIndent) {
+            text = if (settings.firstLineIndent && applyFirstLineIndent) {
                 block.text.lines().joinToString("\n") { line -> line.withFirstLineIndentIfNeeded() }
             } else {
                 block.text
@@ -871,6 +973,117 @@ private fun ReaderBlock(block: ReaderContentBlock, settings: ReaderSettings, tex
             modifier = Modifier.fillMaxWidth(),
             contentScale = ContentScale.FillWidth,
         )
+    }
+}
+
+private data class MeasuredReaderPage(
+    val block: ReaderContentBlock,
+    val sourceIndex: Int,
+)
+
+private val readerPageCache = object : LinkedHashMap<String, List<MeasuredReaderPage>>(8, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<MeasuredReaderPage>>): Boolean {
+        return size > 4
+    }
+}
+
+private fun paginateBlocksForPageMode(
+    blocks: List<ReaderContentBlock>,
+    settings: ReaderSettings,
+    pageWidthPx: Int,
+    pageHeightPx: Int,
+    density: Float,
+): List<MeasuredReaderPage> {
+    if (pageWidthPx <= 0 || pageHeightPx <= 0) {
+        return blocks.mapIndexed { index, block -> MeasuredReaderPage(block, index) }
+    }
+    val cacheKey = buildReaderPageCacheKey(blocks, settings, pageWidthPx, pageHeightPx, density)
+    readerPageCache[cacheKey]?.let { return it }
+    val lineHeightPx = ((settings.fontSizeSp + 10) * density).toInt().coerceAtLeast(1)
+    val linesPerPage = ((pageHeightPx - lineHeightPx / 2) / lineHeightPx).coerceAtLeast(1)
+    val pages = blocks.flatMapIndexed { index, block ->
+        when (block) {
+            is ReaderContentBlock.Image -> listOf(MeasuredReaderPage(block, index))
+            is ReaderContentBlock.Text -> paginateTextForPageMode(
+                text = block.text,
+                sourceIndex = index,
+                settings = settings,
+                pageWidthPx = pageWidthPx,
+                linesPerPage = linesPerPage,
+                density = density,
+            )
+        }
+    }.ifEmpty {
+        listOf(MeasuredReaderPage(ReaderContentBlock.Text(""), 0))
+    }
+    readerPageCache[cacheKey] = pages
+    return pages
+}
+
+private fun paginateTextForPageMode(
+    text: String,
+    sourceIndex: Int,
+    settings: ReaderSettings,
+    pageWidthPx: Int,
+    linesPerPage: Int,
+    density: Float,
+): List<MeasuredReaderPage> {
+    val displayText = readerDisplayText(text, settings)
+    val layout = buildReaderStaticLayout(displayText, settings, pageWidthPx, density)
+    val pages = mutableListOf<MeasuredReaderPage>()
+    var startLine = 0
+    while (startLine < layout.lineCount) {
+        val endLine = (startLine + linesPerPage).coerceAtMost(layout.lineCount)
+        val start = layout.getLineStart(startLine)
+        val next = layout.getLineStart(endLine).coerceAtLeast(start + 1)
+        val pageText = displayText.substring(start, next).trimEnd()
+        pages += MeasuredReaderPage(ReaderContentBlock.Text(pageText), sourceIndex)
+        startLine = endLine
+    }
+    return pages.ifEmpty { listOf(MeasuredReaderPage(ReaderContentBlock.Text(displayText), sourceIndex)) }
+}
+
+private fun buildReaderPageCacheKey(
+    blocks: List<ReaderContentBlock>,
+    settings: ReaderSettings,
+    pageWidthPx: Int,
+    pageHeightPx: Int,
+    density: Float,
+): String {
+    return listOf(
+        System.identityHashCode(blocks),
+        blocks.size,
+        settings.fontSizeSp,
+        settings.firstLineIndent,
+        pageWidthPx,
+        pageHeightPx,
+        (density * 100).toInt(),
+    ).joinToString(":")
+}
+
+private fun buildReaderStaticLayout(
+    text: String,
+    settings: ReaderSettings,
+    pageWidthPx: Int,
+    density: Float,
+): StaticLayout {
+    val lineHeightPx = ((settings.fontSizeSp + 10) * density).toInt().coerceAtLeast(1)
+    val textPaint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
+        textSize = settings.fontSizeSp * density
+    }
+    return StaticLayout.Builder
+        .obtain(text, 0, text.length, textPaint, pageWidthPx)
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setLineSpacing((lineHeightPx - textPaint.fontSpacing).coerceAtLeast(0f), 1f)
+        .setIncludePad(false)
+        .build()
+}
+
+private fun readerDisplayText(text: String, settings: ReaderSettings): String {
+    return if (settings.firstLineIndent) {
+        text.lines().joinToString("\n") { line -> line.withFirstLineIndentIfNeeded() }
+    } else {
+        text
     }
 }
 

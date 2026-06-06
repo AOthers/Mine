@@ -18,8 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -47,9 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.wode.app.data.MovieSource
 import com.wode.app.service.BaiduPanService
-import com.wode.app.service.MovieSourceStore
 import com.wode.app.service.TokenStore
 import com.wode.app.viewmodel.BackupViewModel
 
@@ -58,7 +54,6 @@ import com.wode.app.viewmodel.BackupViewModel
 fun SettingsScreen(
     viewModel: BackupViewModel,
     tokenStore: TokenStore,
-    movieSourceStore: MovieSourceStore,
     onBack: () -> Unit,
     onStartOAuth: (String) -> Unit,
     onChooseRestoreFolder: () -> Unit,
@@ -66,16 +61,12 @@ fun SettingsScreen(
 ) {
     val isAuthorized by viewModel.isAuthorized.collectAsState()
     val restoreDisplayPath by viewModel.restoreDisplayPath.collectAsState()
-    val movieSources by movieSourceStore.sources.collectAsState()
-    val currentMovieSource by movieSourceStore.currentSource.collectAsState()
 
     var appKey by remember { mutableStateOf(tokenStore.getAppKey()) }
     var secretKey by remember { mutableStateOf(tokenStore.getSecretKey()) }
     var backupPath by remember { mutableStateOf(tokenStore.getBackupPath()) }
     var sameVersionStrategy by remember { mutableStateOf(tokenStore.getSameVersionStrategy()) }
     var showApiTutorial by remember { mutableStateOf(false) }
-    var movieSourceName by remember { mutableStateOf("") }
-    var movieSourceUrl by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -106,96 +97,6 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(
-                text = "影视",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Link,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp),
-                        )
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 14.dp),
-                        ) {
-                            Text("影视来源", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                text = currentMovieSource.url,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    movieSources.forEach { source ->
-                        MovieSourceRow(
-                            source = source,
-                            selected = source.id == currentMovieSource.id,
-                            onClick = { movieSourceStore.selectSource(source.id) },
-                            onDelete = { movieSourceStore.deleteSource(source.id) },
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = movieSourceName,
-                        onValueChange = { movieSourceName = it },
-                        label = { Text("来源名称") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = movieSourceUrl,
-                        onValueChange = { movieSourceUrl = it },
-                        label = { Text("来源网址") },
-                        placeholder = { Text(MovieSourceStore.DEFAULT_SOURCE_URL) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                movieSourceStore.restoreDefaults()
-                                movieSourceName = ""
-                                movieSourceUrl = ""
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("恢复默认")
-                        }
-                        Button(
-                            onClick = {
-                                movieSourceStore.addSource(movieSourceName, movieSourceUrl)
-                                movieSourceName = ""
-                                movieSourceUrl = ""
-                            },
-                            enabled = movieSourceUrl.isNotBlank(),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("保存")
-                        }
-                    }
-                }
-            }
-
             Text(
                 text = "百度网盘",
                 style = MaterialTheme.typography.titleMedium,
@@ -230,9 +131,9 @@ fun SettingsScreen(
                         )
                         Text(
                             text = if (isAuthorized) {
-                                "百度网盘已连接，可用于备份和恢复"
+                                "百度网盘已连接，可用于备份和恢复。"
                             } else {
-                                "配置密钥并授权后才能使用网盘能力"
+                                "配置密钥并授权后才能使用网盘能力。"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -289,7 +190,11 @@ fun SettingsScreen(
                             onClick = {
                                 appKey = appKey.trim()
                                 secretKey = secretKey.trim()
-                                tokenStore.saveCredentials(appKey, secretKey)
+                                runCatching {
+                                    tokenStore.saveCredentials(appKey, secretKey)
+                                }.onFailure {
+                                    onPathSaved("保存失败：${it.message}")
+                                }
                             },
                             modifier = Modifier.weight(1f),
                         ) {
@@ -299,8 +204,13 @@ fun SettingsScreen(
                             onClick = {
                                 appKey = appKey.trim()
                                 secretKey = secretKey.trim()
-                                tokenStore.saveCredentials(appKey, secretKey)
-                                if (appKey.isNotBlank()) onStartOAuth(appKey)
+                                runCatching {
+                                    tokenStore.saveCredentials(appKey, secretKey)
+                                }.onSuccess {
+                                    if (appKey.isNotBlank()) onStartOAuth(appKey)
+                                }.onFailure {
+                                    onPathSaved("保存失败：${it.message}")
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             enabled = appKey.isNotBlank(),
@@ -397,7 +307,7 @@ fun SettingsScreen(
                     )
                     StrategyRow(
                         title = "覆盖",
-                        subtitle = "同一应用同一版本再次备份时覆盖原文件",
+                        subtitle = "同一应用同一版本再次备份时覆盖原文件。",
                         selected = sameVersionStrategy == TokenStore.SameVersionStrategy.OVERWRITE,
                         onClick = {
                             sameVersionStrategy = TokenStore.SameVersionStrategy.OVERWRITE
@@ -406,7 +316,7 @@ fun SettingsScreen(
                     )
                     StrategyRow(
                         title = "另存",
-                        subtitle = "同一应用同一版本再次备份时保留一份带时间的新文件",
+                        subtitle = "同一应用同一版本再次备份时保留一份带时间的新文件。",
                         selected = sameVersionStrategy == TokenStore.SameVersionStrategy.SAVE_AS_COPY,
                         onClick = {
                             sameVersionStrategy = TokenStore.SameVersionStrategy.SAVE_AS_COPY
@@ -420,39 +330,6 @@ fun SettingsScreen(
 
     if (showApiTutorial) {
         ApiKeyTutorialDialog(onDismiss = { showApiTutorial = false })
-    }
-}
-
-@Composable
-private fun MovieSourceRow(
-    source: MovieSource,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .clickable(onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(source.name, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                source.url,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (source.id != MovieSourceStore.DEFAULT_SOURCE_ID) {
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "删除")
-            }
-        }
     }
 }
 
@@ -490,7 +367,7 @@ private fun ApiKeyTutorialDialog(onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("1. 打开百度网盘开放平台，登录你的百度账号。")
-                Text("2. 创建一个应用，应用类型选择适合个人使用的网盘应用。")
+                Text("2. 创建一个网盘应用。")
                 Text("3. 在应用配置里找到 AppKey 和 SecretKey，并复制到本页面。")
                 Text("4. OAuth 回调地址填写：wode://baidu.oauth")
                 Text("5. 回到本页面，点击“保存并授权”，浏览器授权成功后会自动回到应用。")

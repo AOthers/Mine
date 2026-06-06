@@ -2,7 +2,6 @@ package com.wode.app.service
 
 import android.content.Context
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.wode.app.data.ReaderItem
 import com.wode.app.data.ReaderPageMode
 import com.wode.app.data.ReaderSettings
@@ -14,8 +13,7 @@ class ReaderLibraryStore(context: Context) {
 
     fun getItems(): List<ReaderItem> {
         val raw = prefs.getString(KEY_ITEMS, null) ?: return emptyList()
-        val type = object : TypeToken<List<ReaderItem>>() {}.type
-        return runCatching { gson.fromJson<List<ReaderItem>>(raw, type) }
+        return runCatching { gson.fromJson(raw, Array<ReaderItem>::class.java).toList() }
             .getOrNull()
             .orEmpty()
             .sortedByDescending { it.lastOpenedAt }
